@@ -167,3 +167,4 @@ pytest tests/test_api.py -v
 - Add caching layer for frequently translated phrases
 - Implement rate limiting and request quotas
 # GEN_AI
+# GEN_AI
