@@ -1,12 +1,19 @@
 """Pet detection service using YOLO for validating pet presence in images/videos."""
 
 import logging
-from typing import List, Optional, Tuple
+from typing import List, Optional, Tuple, Any
 from io import BytesIO
 
 import httpx
 from PIL import Image
 import numpy as np
+
+try:
+    import torch  # type: ignore
+    TORCH_AVAILABLE = True
+except ImportError:
+    torch = None  # type: ignore
+    TORCH_AVAILABLE = False
 
 _logger = logging.getLogger(__name__)
 
@@ -44,14 +51,17 @@ class PetDetectionService:
         self._model = None
         self._initialized = False
 
-    def _lazy_load_model(self):
+    def _lazy_load_model(self) -> None:
         """Lazy load the YOLO model on first use to save memory."""
         if not self._initialized:
             try:
-                import torch
+                if not TORCH_AVAILABLE or torch is None:
+                    raise RuntimeError("PyTorch is not installed. Install with: pip install torch torchvision")
+
                 _logger.info(f"Loading YOLO model: {self.model_name}")
                 self._model = torch.hub.load('ultralytics/yolov5', self.model_name, pretrained=True)
-                self._model.conf = self.confidence_threshold
+                if self._model is not None:
+                    self._model.conf = self.confidence_threshold
                 self._initialized = True
                 _logger.info("✅ YOLO model loaded successfully")
             except Exception as e:
@@ -101,13 +111,14 @@ class PetDetectionService:
         self._lazy_load_model()
 
         try:
+            if self._model is None:
+                raise RuntimeError("YOLO model not loaded")
+
             # Convert PIL Image to numpy array for YOLO
             img_array = np.array(image.convert('RGB'))
 
             # Run inference
-            results = self._model(img_array)
-
-            # Parse detections
+            results = self._model(img_array)            # Parse detections
             detected_pets = []
             detections = results.pandas().xyxy[0]  # Get pandas DataFrame of detections
 

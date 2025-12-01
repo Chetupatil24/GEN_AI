@@ -114,7 +114,6 @@ async def generate_video(
     ai4bharat_client: AI4BharatClient = Depends(get_ai4bharat_client),
     revid_client: RevidClient = Depends(get_revid_client),
     job_store: JobStore = Depends(get_job_store),
-    request: Request = None,
 ) -> GenerateVideoResponse:
     """Request a Revid.ai video after preparing the roast script with AI4Bharat.
 
