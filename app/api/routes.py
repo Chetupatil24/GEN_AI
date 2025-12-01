@@ -4,6 +4,7 @@ import logging
 from typing import Any, Dict
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
+import httpx
 
 from app.clients.ai4bharat import AI4BharatClient
 from app.clients.revid import RevidClient
@@ -28,6 +29,7 @@ from app.schemas import (
     VideoStatusResponse,
 )
 from app.services.job_store import JobRecord, JobStatus, JobStore
+from app.services.pet_detection import get_pet_detector
 
 router = APIRouter(prefix="/api")
 _logger = logging.getLogger(__name__)
@@ -112,9 +114,36 @@ async def generate_video(
     ai4bharat_client: AI4BharatClient = Depends(get_ai4bharat_client),
     revid_client: RevidClient = Depends(get_revid_client),
     job_store: JobStore = Depends(get_job_store),
+    request: Request = None,
 ) -> GenerateVideoResponse:
-    """Request a Revid.ai video after preparing the roast script with AI4Bharat."""
+    """Request a Revid.ai video after preparing the roast script with AI4Bharat.
 
+    This endpoint validates that the image contains pets before generating video.
+    If no pets are detected, it returns a 400 error asking users to upload pet images/videos.
+    """
+
+    # Step 1: Validate pet presence in the image
+    pet_detector = get_pet_detector()
+    async with httpx.AsyncClient(timeout=httpx.Timeout(10.0)) as client:
+        has_pets, detected_pets, _ = await pet_detector.detect_pets_in_image_url(
+            str(payload.image_url),
+            client
+        )
+
+    if not has_pets:
+        _logger.warning(f"No pets detected in image: {payload.image_url}")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={
+                "error": "no_pets_detected",
+                "message": "No pets found in the uploaded image. Please upload an image or video containing pets (dogs, cats, birds, etc.) to generate a roast video.",
+                "suggestion": "Try uploading a clear photo or video of your pet."
+            }
+        )
+
+    _logger.info(f"✅ Pets detected: {', '.join(detected_pets)}")
+
+    # Step 2: Proceed with text processing via AI4Bharat
     try:
         llm_result = await ai4bharat_client.translate_text(
             text=payload.text,
@@ -127,6 +156,7 @@ async def generate_video(
         _logger.exception("AI4Bharat preprocessing failed for video generation")
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
 
+    # Step 3: Create video generation job with Revid
     try:
         revid_response = await revid_client.create_video_job(
             text=clean_text,
@@ -141,6 +171,7 @@ async def generate_video(
     status_value = _normalise_status(revid_response.get("status", "queued"))
     detail = revid_response.get("detail")
 
+    # Step 4: Store job with detected pets metadata
     record = JobRecord(
         job_id=job_id,
         status=status_value,
@@ -151,7 +182,10 @@ async def generate_video(
     )
     await job_store.upsert(record)
 
-    return GenerateVideoResponse(job_id=job_id, status=status_value)
+    return GenerateVideoResponse(
+        job_id=job_id,
+        status=status_value,
+    )
 
 
 @router.get("/video-status/{job_id}", response_model=VideoStatusResponse)

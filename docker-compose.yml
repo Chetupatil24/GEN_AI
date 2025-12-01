@@ -1,0 +1,123 @@
+version: '3.8'
+
+services:
+  # Pet Roast AI Backend Service
+  pet-roast-api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: pet-roast-api
+    ports:
+      - "8000:8000"
+    environment:
+      # AI4Bharat IndicTrans2 Configuration
+      - AI4BHARAT_BASE_URL=http://indictrans2:5000
+      - AI4BHARAT_TRANSLATE_PATH=/translate
+      - AI4BHARAT_API_KEY=${AI4BHARAT_API_KEY:-}
+
+      # Revid.ai API Configuration
+      - REVID_API_KEY=${REVID_API_KEY}
+      - REVID_BASE_URL=https://api.revid.ai/v1
+      - REVID_WEBHOOK_SECRET=${REVID_WEBHOOK_SECRET}
+
+      # Redis Configuration
+      - REDIS_URL=redis://redis:6379/0
+      - USE_REDIS=true
+      - REDIS_JOB_TTL_SECONDS=604800
+
+      # Retry Configuration
+      - MAX_RETRIES=3
+      - RETRY_BACKOFF_FACTOR=1.5
+
+    depends_on:
+      - redis
+      - indictrans2
+
+    volumes:
+      - ./app:/app/app
+      - ./logs:/app/logs
+
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/healthz"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+    restart: unless-stopped
+
+    networks:
+      - pet-roast-network
+
+  # Redis for persistent job storage
+  redis:
+    image: redis:7-alpine
+    container_name: pet-roast-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    networks:
+      - pet-roast-network
+
+  # IndicTrans2 Translation Service
+  indictrans2:
+    build:
+      context: ./IndicTrans2
+      dockerfile: Dockerfile
+    container_name: pet-roast-indictrans2
+    ports:
+      - "5000:5000"
+    environment:
+      - PYTHONUNBUFFERED=1
+    volumes:
+      - ./IndicTrans2:/app
+      - indictrans2-models:/app/models
+    command: python inference_server_simple.py --host 0.0.0.0 --port 5000
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    restart: unless-stopped
+    networks:
+      - pet-roast-network
+    deploy:
+      resources:
+        limits:
+          cpus: '4'
+          memory: 8G
+
+  # Streamlit UI (Optional - for testing)
+  streamlit-ui:
+    build:
+      context: .
+      dockerfile: Dockerfile.streamlit
+    container_name: pet-roast-streamlit
+    ports:
+      - "8501:8501"
+    environment:
+      - BACKEND_URL=http://pet-roast-api:8000
+    depends_on:
+      - pet-roast-api
+    restart: unless-stopped
+    networks:
+      - pet-roast-network
+
+volumes:
+  redis-data:
+    driver: local
+  indictrans2-models:
+    driver: local
+
+networks:
+  pet-roast-network:
+    driver: bridge
