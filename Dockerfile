@@ -27,12 +27,12 @@ COPY examples/ ./examples/
 # Create logs directory
 RUN mkdir -p logs
 
-# Expose port
+# Railway automatically sets PORT, so we use environment variable
 EXPOSE 8000
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
-    CMD curl -f http://localhost:8000/healthz || exit 1
+    CMD ["sh", "-c", "curl -f http://localhost:${PORT:-8000}/healthz || exit 1"]
 
-# Run the application
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "2"]
+# Run the application (Railway will override with PORT env var)
+CMD ["sh", "-c", "uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000} --workers 1"]

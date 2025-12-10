@@ -81,9 +81,12 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+# Configure CORS for Railway backend
+settings_for_cors = get_settings()
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=settings_for_cors.cors_origins,
+    allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )

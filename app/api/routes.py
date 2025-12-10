@@ -1,5 +1,6 @@
 """API route definitions for the pet roasting backend."""
 
+import asyncio
 import logging
 from typing import Any, Dict
 
@@ -187,6 +188,151 @@ async def generate_video(
     )
 
 
+@router.post("/webhook/video-complete")
+async def video_completion_webhook(
+    payload: dict,
+    job_store: JobStore = Depends(get_job_store),
+    settings: Settings = Depends(get_settings_dependency),
+) -> dict:
+    """Webhook endpoint for Revid.ai to notify when video is complete.
+
+    This endpoint will be called by Revid when video generation completes.
+    It updates the job status and notifies the backend via webhook with retry logic.
+
+    Expected payload:
+    {
+        "job_id": "abc123",
+        "status": "completed" | "failed",
+        "video_url": "https://...",  // optional, present if completed
+        "error": "error message"      // optional, present if failed
+    }
+    """
+    job_id = None
+    try:
+        # Validate required fields
+        job_id = payload.get("job_id")
+        status_str = payload.get("status", "completed")
+        video_url = payload.get("video_url")
+        error = payload.get("error")
+
+        if not job_id:
+            _logger.error("❌ Webhook received without job_id")
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Missing job_id in webhook payload"
+            )
+
+        _logger.info(f"📥 Webhook received for job {job_id}: status={status_str}")
+
+        # Update job status in store
+        stored_record = await job_store.get(job_id)
+        if stored_record:
+            stored_record.status = _normalise_status(status_str)
+            if video_url:
+                stored_record.video_url = video_url
+                _logger.info(f"📹 Video URL for job {job_id}: {video_url}")
+            if error:
+                stored_record.detail = error
+                _logger.error(f"❌ Job {job_id} failed: {error}")
+            await job_store.upsert(stored_record)
+            _logger.info(f"✅ Updated job {job_id} in store: {status_str}")
+        else:
+            _logger.warning(f"⚠️  Job {job_id} not found in store, creating new record")
+            # Create new record if not exists
+            new_record = JobRecord(
+                job_id=job_id,
+                status=_normalise_status(status_str),
+                text="",
+                image_url="",
+                language="en",
+                video_url=video_url,
+                detail=error,
+            )
+            await job_store.upsert(new_record)
+
+        # Notify backend with retry logic
+        backend_webhook_url = settings.backend_webhook_url
+        if backend_webhook_url:
+            _logger.info(f"🔔 Notifying backend at {backend_webhook_url}")
+
+            webhook_payload = {
+                "job_id": job_id,
+                "status": status_str,
+                "video_url": video_url,
+                "error": error,
+                "timestamp": None,  # Will be set by backend
+            }
+
+            # Retry configuration
+            max_retries = 3
+            retry_delay = 1.0  # seconds
+
+            for attempt in range(max_retries):
+                try:
+                    async with httpx.AsyncClient(
+                        timeout=httpx.Timeout(15.0, connect=5.0)
+                    ) as client:
+                        response = await client.post(
+                            backend_webhook_url,
+                            json=webhook_payload,
+                            headers={
+                                "Content-Type": "application/json",
+                                "X-Webhook-Source": "pet-roast-ai",
+                                "X-Job-ID": job_id,
+                            }
+                        )
+                        response.raise_for_status()
+                        _logger.info(
+                            f"✅ Backend notified successfully (attempt {attempt + 1}/{max_retries}): "
+                            f"status={response.status_code}"
+                        )
+                        break  # Success, exit retry loop
+
+                except httpx.TimeoutException as e:
+                    _logger.warning(
+                        f"⏱️  Backend webhook timeout (attempt {attempt + 1}/{max_retries}): {e}"
+                    )
+                    if attempt < max_retries - 1:
+                        await asyncio.sleep(retry_delay * (attempt + 1))
+                    else:
+                        _logger.error(f"❌ Backend notification failed after {max_retries} attempts")
+
+                except httpx.HTTPStatusError as e:
+                    _logger.error(
+                        f"❌ Backend webhook returned error {e.response.status_code} "
+                        f"(attempt {attempt + 1}/{max_retries}): {e.response.text}"
+                    )
+                    if attempt < max_retries - 1 and e.response.status_code >= 500:
+                        # Retry on 5xx errors
+                        await asyncio.sleep(retry_delay * (attempt + 1))
+                    else:
+                        break  # Don't retry on 4xx errors
+
+                except Exception as e:
+                    _logger.error(
+                        f"❌ Unexpected error notifying backend (attempt {attempt + 1}/{max_retries}): {e}"
+                    )
+                    if attempt < max_retries - 1:
+                        await asyncio.sleep(retry_delay * (attempt + 1))
+        else:
+            _logger.debug("ℹ️  No backend webhook URL configured, skipping notification")
+
+        return {
+            "status": "success",
+            "message": f"Webhook processed for job {job_id}",
+            "job_id": job_id,
+        }
+
+    except HTTPException:
+        raise  # Re-raise HTTP exceptions as-is
+    except Exception as e:
+        _logger.exception(f"❌ Webhook processing failed for job {job_id}: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to process webhook: {str(e)}"
+        )
+
+
 @router.get("/video-status/{job_id}", response_model=VideoStatusResponse)
 async def get_video_status(
     job_id: str,
@@ -294,6 +440,87 @@ async def get_video_result(
         video_url=record.video_url,
         detail=record.detail,
     )
+
+
+@router.get("/test-backend-connection")
+async def test_backend_connection(
+    settings: Settings = Depends(get_settings_dependency),
+) -> dict:
+    """Test connectivity to the backend webhook URL.
+
+    This endpoint helps verify that the AI service can reach the backend.
+    Returns connection status and response time.
+    """
+    backend_webhook_url = settings.backend_webhook_url
+
+    if not backend_webhook_url:
+        return {
+            "status": "not_configured",
+            "message": "BACKEND_WEBHOOK_URL environment variable not set",
+            "backend_url": None,
+        }
+
+    # Test connectivity with a health check payload
+    test_payload = {
+        "job_id": "test_connection",
+        "status": "test",
+        "message": "Connection test from AI service"
+    }
+
+    import time
+    start_time = time.time()
+
+    try:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(10.0)) as client:
+            response = await client.post(
+                backend_webhook_url,
+                json=test_payload,
+                headers={
+                    "Content-Type": "application/json",
+                    "X-Webhook-Source": "pet-roast-ai",
+                    "X-Test": "true",
+                }
+            )
+            elapsed = time.time() - start_time
+
+            return {
+                "status": "success",
+                "message": "Backend is reachable",
+                "backend_url": backend_webhook_url,
+                "response_code": response.status_code,
+                "response_time_ms": round(elapsed * 1000, 2),
+                "response_body": response.text[:200] if response.text else None,
+            }
+
+    except httpx.TimeoutException as e:
+        elapsed = time.time() - start_time
+        return {
+            "status": "timeout",
+            "message": f"Backend connection timeout after {elapsed:.2f}s",
+            "backend_url": backend_webhook_url,
+            "error": str(e),
+        }
+
+    except httpx.HTTPStatusError as e:
+        elapsed = time.time() - start_time
+        return {
+            "status": "error",
+            "message": f"Backend returned error {e.response.status_code}",
+            "backend_url": backend_webhook_url,
+            "response_code": e.response.status_code,
+            "response_time_ms": round(elapsed * 1000, 2),
+            "error": e.response.text[:200] if e.response.text else None,
+        }
+
+    except Exception as e:
+        elapsed = time.time() - start_time
+        return {
+            "status": "failed",
+            "message": "Failed to connect to backend",
+            "backend_url": backend_webhook_url,
+            "response_time_ms": round(elapsed * 1000, 2),
+            "error": str(e),
+        }
 
 
 @router.get("/banuba-filters", response_model=BanubaFiltersResponse)

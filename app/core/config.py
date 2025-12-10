@@ -59,6 +59,14 @@ class Settings(BaseSettings):
     use_redis: bool = True
     redis_job_ttl_seconds: int = 86400 * 7  # 7 days
 
+    # Backend webhook configuration (for notifying Railway backend)
+    backend_webhook_url: Optional[str] = None  # Set to your Railway backend URL
+
+    # CORS origins (add your Railway backend URL)
+    cors_origins: List[str] = Field(
+        default_factory=lambda: ["*"]  # In production, specify exact origins
+    )
+
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",

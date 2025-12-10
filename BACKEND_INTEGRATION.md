@@ -1,666 +1,671 @@
-# Backend Integration Guide - Pet Roast AI
+# 🔗 Backend Integration Guide
 
-This document provides a comprehensive guide for integrating the Pet Roast AI system with your backend (Snapchat-like community app).
-
-## 🎯 Overview
-
-Pet Roast AI is a **microservice** that provides:
-- ✅ Pet detection in images/videos (validates pet presence before processing)
-- 🌐 Multilingual text translation (13+ Indian languages + English)
-- 🎬 AI-powered video generation with roast narration
-- 🎨 AR filter recommendations (Banuba integration ready)
+Complete guide for integrating the Pet Roast AI Service with your Railway backend.
 
 ## 📋 Table of Contents
 
-1. [Architecture Overview](#architecture-overview)
-2. [API Endpoints](#api-endpoints)
-3. [Integration Patterns](#integration-patterns)
-4. [Webhooks Setup](#webhooks-setup)
-5. [Example Backend Client](#example-backend-client)
-6. [Deployment Guide](#deployment-guide)
-7. [Error Handling](#error-handling)
+- [Architecture Overview](#architecture-overview)
+- [API Endpoints](#api-endpoints)
+- [Backend Implementation](#backend-implementation)
+- [Environment Configuration](#environment-configuration)
+- [Error Handling](#error-handling)
+- [Testing Integration](#testing-integration)
 
 ---
 
 ## 🏗️ Architecture Overview
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                   Your Snapchat-like App                    │
-│                        (Backend)                            │
-│  ┌────────────┐  ┌────────────┐  ┌────────────┐           │
-│  │   User     │  │   Posts    │  │   Media    │           │
-│  │ Management │  │  Service   │  │  Storage   │           │
-│  └────────────┘  └────────────┘  └────────────┘           │
-│         │              │                │                   │
-│         └──────────────┴────────────────┘                   │
-│                        │                                     │
-│                        ▼ (HTTP/REST API)                    │
-└─────────────────────────────────────────────────────────────┘
-                         │
-                         ▼
-┌─────────────────────────────────────────────────────────────┐
-│                 Pet Roast AI Microservice                   │
-│  ┌────────────┐  ┌────────────┐  ┌────────────┐           │
-│  │    Pet     │  │ Translation│  │   Video    │           │
-│  │ Detection  │  │  (AI4Bharat)│  │Generation │           │
-│  │  (YOLO)    │  │            │  │  (Revid)   │           │
-│  └────────────┘  └────────────┘  └────────────┘           │
-│                                                              │
-│  ┌────────────┐  ┌────────────┐                            │
-│  │   Redis    │  │  Webhook   │                            │
-│  │Job Storage │  │  Handler   │                            │
-│  └────────────┘  └────────────┘                            │
-└─────────────────────────────────────────────────────────────┘
-                         │
-                         ▼ (Webhook Callback)
-┌─────────────────────────────────────────────────────────────┐
-│              Your Backend Webhook Endpoint                  │
-│         (Receives video completion notifications)           │
+┌────────────────────────────────────────────────────────────┐
+│  Mobile App / Frontend                                      │
+└─────────────────────┬──────────────────────────────────────┘
+                      │ GraphQL
+                      ▼
+┌────────────────────────────────────────────────────────────┐
+│  Backend (Node.js + GraphQL)                               │
+│  Railway: https://your-backend.railway.app                 │
+│                                                             │
+│  ✓ Receives video generation requests                      │
+│  ✓ Calls AI Service REST API                               │
+│  ✓ Stores job_id in database                               │
+│  ✓ Receives webhook when video ready                       │
+│  ✓ Notifies user via push notification                     │
+└──────┬─────────────────────────────────────────────────────┘
+       │
+       │ REST API
+       ▼
+┌────────────────────────────────────────────────────────────┐
+│  AI Service (FastAPI + Python)                             │
+│  Railway: https://your-ai-service.up.railway.app           │
+│                                                             │
+│  ✓ Validates pet presence (YOLOv5)                         │
+│  ✓ Processes text (AI4Bharat translation)                  │
+│  ✓ Generates video (Revid.ai)                              │
+│  ✓ Stores job status (Redis)                               │
+│  ✓ Webhooks backend when complete                          │
 └─────────────────────────────────────────────────────────────┘
 ```
 
 ---
 
-## 🔌 API Endpoints
+## 🎯 API Endpoints
 
-### Base URL
-```
-Production: https://your-domain.com
-Development: http://localhost:8000
-```
+### 1. Generate Video (Backend → AI Service)
 
-### 1. Health Check
+**Endpoint:** `POST https://your-ai-service.up.railway.app/api/generate-video`
 
-**Endpoint:** `GET /healthz`
-
-**Purpose:** Check if the service is running
-
-**Response:**
-```json
-{
-  "status": "ok"
+**Request:**
+```typescript
+interface GenerateVideoRequest {
+  text: string;           // Roast text (any language)
+  image_url: string;      // Pet image URL (must be publicly accessible)
 }
 ```
 
----
-
-### 2. Translate Text
-
-**Endpoint:** `POST /api/translate-text`
-
-**Purpose:** Translate text between Indian languages
-
-**Request Body:**
-```json
-{
-  "text": "This is a cute dog!",
-  "source_lang": "en",
-  "target_lang": "hi",
-  "task": "translation"
+**Response (202 Accepted):**
+```typescript
+interface GenerateVideoResponse {
+  job_id: string;         // Track this job ID
+  status: "queued" | "processing";
 }
 ```
 
-**Response:**
-```json
-{
-  "translated_text": "यह एक प्यारा कुत्ता है!",
-  "source_language": "en",
-  "target_language": "hi",
-  "task": "translation",
-  "provider_metadata": {}
-}
-```
-
-**Supported Languages:**
-- `en` - English
-- `hi` - Hindi
-- `bn` - Bengali
-- `ta` - Tamil
-- `te` - Telugu
-- `ml` - Malayalam
-- `kn` - Kannada
-- `gu` - Gujarati
-- `mr` - Marathi
-- `pa` - Punjabi
-- `or` - Odia
-- `as` - Assamese
-- `ur` - Urdu
-
----
-
-### 3. Generate Video (with Pet Detection)
-
-**Endpoint:** `POST /api/generate-video`
-
-**Purpose:** Generate AI roast video. **Automatically validates pet presence before processing.**
-
-**Request Body:**
-```json
-{
-  "text": "Roast my lazy dog who sleeps all day!",
-  "image_url": "https://your-cdn.com/pets/user123/dog.jpg"
-}
-```
-
-**Success Response (202 Accepted):**
-```json
-{
-  "job_id": "revid_abc123xyz",
-  "status": "queued"
-}
-```
-
-**Error Response - No Pets Detected (400 Bad Request):**
-```json
-{
-  "detail": {
-    "error": "no_pets_detected",
-    "message": "No pets found in the uploaded image. Please upload an image or video containing pets (dogs, cats, birds, etc.) to generate a roast video.",
-    "suggestion": "Try uploading a clear photo or video of your pet."
+**Error Response (400 - No Pets):**
+```typescript
+interface NoPetsError {
+  detail: {
+    error: "no_pets_detected";
+    message: "No pets found in the uploaded image...";
+    suggestion: "Try uploading a clear photo or video of your pet.";
   }
 }
 ```
 
-**Pet Detection Logic:**
-- ✅ Uses YOLOv5 to detect pets (dogs, cats, birds, horses, etc.)
-- ✅ Minimum confidence threshold: 50%
-- ✅ Supported pets: dog, cat, bird, horse, sheep, cow, elephant, bear, zebra, giraffe
-- ❌ Rejects images without pets immediately (saves API costs!)
-
----
-
-### 4. Check Video Status
-
-**Endpoint:** `GET /api/video-status/{job_id}`
-
-**Purpose:** Poll for video generation progress
-
-**Response:**
-```json
-{
-  "job_id": "revid_abc123xyz",
-  "status": "processing",
-  "detail": "Video is being rendered",
-  "updated_at": "2025-12-01T10:30:00Z"
-}
-```
-
-**Status Values:**
-- `queued` - Job accepted, waiting to start
-- `processing` - Video generation in progress
-- `completed` - Video ready
-- `failed` - Error occurred
-
----
-
-### 5. Get Video Result
-
-**Endpoint:** `GET /api/video-result/{job_id}`
-
-**Purpose:** Retrieve final video URL
-
-**Response:**
-```json
-{
-  "job_id": "revid_abc123xyz",
-  "status": "completed",
-  "video_url": "https://cdn.revid.ai/videos/abc123xyz.mp4",
-  "detail": "Video generation successful"
+**Error Response (502 - Service Error):**
+```typescript
+interface ServiceError {
+  detail: string;         // Error message from AI4Bharat or Revid
 }
 ```
 
 ---
 
-### 6. Get AR Filters
+### 2. Check Video Status (Backend → AI Service)
 
-**Endpoint:** `GET /api/banuba-filters`
-
-**Purpose:** List available AR filters for video enhancement
+**Endpoint:** `GET https://your-ai-service.up.railway.app/api/video-status/{job_id}`
 
 **Response:**
-```json
-{
-  "filters": [
-    {
-      "id": "desi-fire",
-      "name": "Desi Fire",
-      "description": "Adds spicy overlays and glow effects for dramatic roasts."
-    },
-    {
-      "id": "pet-maharaja",
-      "name": "Pet Maharaja",
-      "description": "Turns pets into regal royalty with ornate accessories."
-    },
-    {
-      "id": "bollywood-burn",
-      "name": "Bollywood Burn",
-      "description": "Provides cinematic lighting and spark particles."
+```typescript
+interface VideoStatusResponse {
+  job_id: string;
+  status: "queued" | "processing" | "completed" | "failed";
+  detail?: string;        // Error message if failed
+  updated_at?: string;    // ISO 8601 timestamp
+  video_url?: string;     // Only present when status is "completed"
+}
+```
+
+---
+
+### 3. Video Completion Webhook (AI Service → Backend)
+
+**Endpoint:** `POST https://your-backend.railway.app/webhooks/pet-roast-complete`
+
+**Request (from AI Service):**
+```typescript
+interface VideoCompleteWebhook {
+  job_id: string;
+  status: "completed" | "failed";
+  video_url?: string;     // Only present if status is "completed"
+  error?: string;         // Only present if status is "failed"
+}
+```
+
+**Expected Response:**
+```typescript
+interface WebhookAck {
+  status: "success";
+  message: string;
+}
+```
+
+---
+
+## 💻 Backend Implementation
+
+### 1. GraphQL Mutation (Generate Video)
+
+```typescript
+// types/pet-roast.ts
+export interface GenerateRoastInput {
+  petId: string;
+  text: string;
+  imageUrl: string;
+}
+
+export interface RoastJob {
+  id: string;
+  jobId: string;          // AI service job_id
+  petId: string;
+  text: string;
+  imageUrl: string;
+  status: 'queued' | 'processing' | 'completed' | 'failed';
+  videoUrl?: string;
+  error?: string;
+  createdAt: Date;
+  updatedAt: Date;
+}
+```
+
+```typescript
+// resolvers/pet-roast.resolver.ts
+import { Resolver, Mutation, Args, Query } from '@nestjs/graphql';
+import { HttpService } from '@nestjs/axios';
+import { firstValueFrom } from 'rxjs';
+
+@Resolver()
+export class PetRoastResolver {
+  private readonly AI_SERVICE_URL = process.env.AI_SERVICE_URL;
+
+  constructor(
+    private readonly httpService: HttpService,
+    private readonly roastJobRepository: RoastJobRepository,
+    private readonly notificationService: NotificationService,
+  ) {}
+
+  @Mutation(() => RoastJob)
+  async generatePetRoast(
+    @Args('input') input: GenerateRoastInput,
+  ): Promise<RoastJob> {
+    try {
+      // Call AI service to generate video
+      const response = await firstValueFrom(
+        this.httpService.post(`${this.AI_SERVICE_URL}/api/generate-video`, {
+          text: input.text,
+          image_url: input.imageUrl,
+        })
+      );
+
+      const { job_id, status } = response.data;
+
+      // Save job to database
+      const roastJob = await this.roastJobRepository.create({
+        jobId: job_id,
+        petId: input.petId,
+        text: input.text,
+        imageUrl: input.imageUrl,
+        status: status,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      });
+
+      return roastJob;
+
+    } catch (error) {
+      // Handle no pets detected error
+      if (error.response?.status === 400) {
+        const errorDetail = error.response.data?.detail;
+        if (errorDetail?.error === 'no_pets_detected') {
+          throw new Error(errorDetail.message);
+        }
+      }
+
+      // Handle other errors
+      throw new Error(
+        `Failed to generate roast: ${error.message}`
+      );
     }
-  ]
+  }
+
+  @Query(() => RoastJob)
+  async getRoastJob(@Args('jobId') jobId: string): Promise<RoastJob> {
+    return await this.roastJobRepository.findByJobId(jobId);
+  }
 }
 ```
 
 ---
 
-## 🔄 Integration Patterns
+### 2. Webhook Handler (Receive Video Completion)
 
-### Pattern 1: Synchronous Upload Flow
+```typescript
+// controllers/webhook.controller.ts
+import { Controller, Post, Body, HttpCode } from '@nestjs/common';
 
-**Use Case:** User uploads pet photo immediately
+interface VideoCompletePayload {
+  job_id: string;
+  status: 'completed' | 'failed';
+  video_url?: string;
+  error?: string;
+}
 
-```python
-# In your backend when user uploads a pet photo:
+@Controller('webhooks')
+export class WebhookController {
+  constructor(
+    private readonly roastJobRepository: RoastJobRepository,
+    private readonly notificationService: NotificationService,
+    private readonly firebaseService: FirebaseService,
+  ) {}
 
-import httpx
+  @Post('pet-roast-complete')
+  @HttpCode(200)
+  async handleVideoComplete(@Body() payload: VideoCompletePayload) {
+    console.log('📥 Received video completion webhook:', payload);
 
-async def handle_pet_upload(user_id: str, image_url: str, prompt: str):
-    """Handle pet photo upload and generate roast video"""
+    try {
+      // Find job in database
+      const roastJob = await this.roastJobRepository.findByJobId(
+        payload.job_id
+      );
 
-    # 1. Call Pet Roast AI to generate video
-    async with httpx.AsyncClient() as client:
-        response = await client.post(
-            "http://pet-roast-ai:8000/api/generate-video",
-            json={
-                "text": prompt,
-                "image_url": image_url
-            }
-        )
+      if (!roastJob) {
+        console.warn(`⚠️  Job not found: ${payload.job_id}`);
+        return { status: 'success', message: 'Job not found, ignoring' };
+      }
 
-        if response.status_code == 400:
-            # No pets detected - show error to user
-            error = response.json()["detail"]
-            return {
-                "success": False,
-                "message": error["message"],
-                "suggestion": error["suggestion"]
-            }
+      // Update job status
+      roastJob.status = payload.status;
+      roastJob.updatedAt = new Date();
 
-        response.raise_for_status()
-        data = response.json()
-        job_id = data["job_id"]
+      if (payload.status === 'completed' && payload.video_url) {
+        roastJob.videoUrl = payload.video_url;
 
-    # 2. Store job_id in your database
-    await db.posts.create({
-        "user_id": user_id,
-        "job_id": job_id,
-        "status": "processing",
-        "image_url": image_url,
-        "prompt": prompt
-    })
+        // Store video in Firebase Storage (optional)
+        const firebaseUrl = await this.firebaseService.storeVideoUrl(
+          payload.video_url,
+          roastJob.id
+        );
+        roastJob.videoUrl = firebaseUrl;
 
-    # 3. Return immediately to user
-    return {
-        "success": True,
-        "job_id": job_id,
-        "message": "Your roast video is being generated!"
+        console.log(`✅ Video ready for job ${payload.job_id}`);
+
+        // Send push notification to user
+        await this.notificationService.sendVideoReadyNotification(
+          roastJob.userId,
+          roastJob.petId,
+          firebaseUrl
+        );
+
+      } else if (payload.status === 'failed') {
+        roastJob.error = payload.error || 'Video generation failed';
+        console.error(`❌ Video failed for job ${payload.job_id}:`, roastJob.error);
+
+        // Send error notification to user
+        await this.notificationService.sendVideoFailedNotification(
+          roastJob.userId,
+          roastJob.petId
+        );
+      }
+
+      // Save updated job
+      await this.roastJobRepository.save(roastJob);
+
+      return {
+        status: 'success',
+        message: `Job ${payload.job_id} updated successfully`
+      };
+
+    } catch (error) {
+      console.error('❌ Webhook processing error:', error);
+      // Return 200 anyway to avoid webhook retries
+      return {
+        status: 'error',
+        message: error.message
+      };
     }
+  }
+}
 ```
 
 ---
 
-### Pattern 2: Background Job Processing
+### 3. Notification Service (Push Notifications)
 
-**Use Case:** Generate videos in background queue
+```typescript
+// services/notification.service.ts
+import { Injectable } from '@nestjs/common';
+import * as admin from 'firebase-admin';
 
-```python
-# Using Celery or similar task queue
+@Injectable()
+export class NotificationService {
+  async sendVideoReadyNotification(
+    userId: string,
+    petId: string,
+    videoUrl: string
+  ): Promise<void> {
+    // Get user's FCM token from database
+    const user = await this.userRepository.findById(userId);
+    if (!user?.fcmToken) {
+      console.warn(`No FCM token for user ${userId}`);
+      return;
+    }
 
-@celery.app.task
-async def generate_roast_video_task(post_id: str):
-    """Background task to generate roast video"""
+    // Send push notification
+    const message = {
+      token: user.fcmToken,
+      notification: {
+        title: '🎬 Your Pet Roast is Ready!',
+        body: 'Your hilarious pet roast video is ready to watch!',
+      },
+      data: {
+        type: 'video_ready',
+        petId: petId,
+        videoUrl: videoUrl,
+      },
+    };
 
-    # 1. Get post data from database
-    post = await db.posts.get(post_id)
+    try {
+      await admin.messaging().send(message);
+      console.log(`✅ Notification sent to user ${userId}`);
+    } catch (error) {
+      console.error(`❌ Failed to send notification:`, error);
+    }
+  }
 
-    # 2. Call Pet Roast AI
-    async with httpx.AsyncClient() as client:
-        response = await client.post(
-            "http://pet-roast-ai:8000/api/generate-video",
-            json={
-                "text": post.prompt,
-                "image_url": post.image_url
-            }
-        )
+  async sendVideoFailedNotification(
+    userId: string,
+    petId: string
+  ): Promise<void> {
+    const user = await this.userRepository.findById(userId);
+    if (!user?.fcmToken) return;
 
-        if response.status_code == 400:
-            # No pets - mark post as invalid
-            await db.posts.update(post_id, {
-                "status": "failed",
-                "error": "no_pets_detected"
-            })
-            return
+    const message = {
+      token: user.fcmToken,
+      notification: {
+        title: '😞 Video Generation Failed',
+        body: 'Sorry, we couldn\'t generate your pet roast. Please try again.',
+      },
+      data: {
+        type: 'video_failed',
+        petId: petId,
+      },
+    };
 
-        data = response.json()
-        job_id = data["job_id"]
-
-    # 3. Update database with job_id
-    await db.posts.update(post_id, {
-        "job_id": job_id,
-        "status": "processing"
-    })
-
-    # 4. Poll for completion (or use webhooks)
-    while True:
-        await asyncio.sleep(5)  # Poll every 5 seconds
-
-        status_response = await client.get(
-            f"http://pet-roast-ai:8000/api/video-status/{job_id}"
-        )
-        status_data = status_response.json()
-
-        if status_data["status"] == "completed":
-            # Get final video URL
-            result_response = await client.get(
-                f"http://pet-roast-ai:8000/api/video-result/{job_id}"
-            )
-            result = result_response.json()
-
-            # Update database
-            await db.posts.update(post_id, {
-                "status": "completed",
-                "video_url": result["video_url"]
-            })
-            break
-
-        elif status_data["status"] == "failed":
-            await db.posts.update(post_id, {
-                "status": "failed"
-            })
-            break
+    await admin.messaging().send(message);
+  }
+}
 ```
 
 ---
 
-## 🪝 Webhooks Setup
+## ⚙️ Environment Configuration
 
-### Configure Webhook in .env
+### AI Service (.env)
+
+```env
+# Revid.ai API
+REVID_API_KEY=your_revid_api_key_here
+
+# Backend webhook URL (YOUR Railway backend)
+BACKEND_WEBHOOK_URL=https://your-backend.railway.app/webhooks/pet-roast-complete
+
+# CORS origins (allow your backend)
+CORS_ORIGINS=["https://your-backend.railway.app","https://your-frontend.vercel.app"]
+
+# Redis (Railway addon)
+REDIS_URL=redis://default:password@redis.railway.internal:6379
+USE_REDIS=true
+
+# AI4Bharat (optional if using external service)
+AI4BHARAT_BASE_URL=http://localhost:5000
+AI4BHARAT_API_KEY=optional_key
+```
+
+---
+
+### Backend (.env)
+
+```env
+# AI Service URL
+AI_SERVICE_URL=https://your-ai-service.up.railway.app
+
+# Database
+DATABASE_URL=postgresql://user:pass@host:5432/db
+
+# Firebase
+FIREBASE_PROJECT_ID=your-project
+FIREBASE_PRIVATE_KEY=your-private-key
+FIREBASE_CLIENT_EMAIL=your-client-email
+
+# Redis (if needed)
+REDIS_URL=redis://default:password@redis.railway.internal:6379
+```
+
+---
+
+## 🚨 Error Handling
+
+### Common Error Scenarios
+
+#### 1. No Pets Detected (400)
+
+```typescript
+try {
+  const response = await axios.post(`${AI_SERVICE_URL}/api/generate-video`, {
+    text: roastText,
+    image_url: petImageUrl
+  });
+} catch (error) {
+  if (error.response?.status === 400) {
+    const errorDetail = error.response.data?.detail;
+    if (errorDetail?.error === 'no_pets_detected') {
+      // Show user-friendly message
+      throw new Error(
+        'No pets found in your image. Please upload a clear photo of your pet!'
+      );
+    }
+  }
+}
+```
+
+#### 2. AI Service Timeout (502)
+
+```typescript
+import { HttpService } from '@nestjs/axios';
+import { timeout, catchError } from 'rxjs/operators';
+import { throwError } from 'rxjs';
+
+const response$ = this.httpService.post(url, data).pipe(
+  timeout(30000), // 30 second timeout
+  catchError(error => {
+    if (error.name === 'TimeoutError') {
+      return throwError(() => new Error('AI service timeout'));
+    }
+    return throwError(() => error);
+  })
+);
+```
+
+#### 3. Video Generation Failed
+
+```typescript
+// In webhook handler
+if (payload.status === 'failed') {
+  // Log error
+  console.error(`Video failed: ${payload.error}`);
+
+  // Update database
+  await this.roastJobRepository.update(payload.job_id, {
+    status: 'failed',
+    error: payload.error
+  });
+
+  // Notify user
+  await this.notificationService.sendVideoFailedNotification(userId, petId);
+}
+```
+
+---
+
+## 🧪 Testing Integration
+
+### 1. Test AI Service Health
 
 ```bash
-# Pet Roast AI .env file
-REVID_WEBHOOK_SECRET=your-secret-key-here
+curl https://your-ai-service.up.railway.app/healthz
+# Expected: {"status":"ok"}
 ```
 
-### Create Webhook Endpoint in Your Backend
-
-```python
-# In your Snapchat-like app backend
-
-from fastapi import APIRouter, Request, HTTPException
-import hmac
-import hashlib
-
-router = APIRouter()
-
-@router.post("/webhooks/pet-roast-video-complete")
-async def handle_video_completion(request: Request):
-    """Receive notifications when videos are ready"""
-
-    # 1. Verify webhook signature
-    signature = request.headers.get("X-Revid-Signature")
-    body = await request.body()
-
-    expected_signature = hmac.new(
-        key=b"your-secret-key-here",
-        msg=body,
-        digestmod=hashlib.sha256
-    ).hexdigest()
-
-    if signature != expected_signature:
-        raise HTTPException(status_code=401, detail="Invalid signature")
-
-    # 2. Parse webhook payload
-    data = await request.json()
-    job_id = data["job_id"]
-    status = data["status"]
-    video_url = data.get("video_url")
-
-    # 3. Update your database
-    await db.posts.update_by_job_id(job_id, {
-        "status": status,
-        "video_url": video_url
-    })
-
-    # 4. Notify user (push notification, websocket, etc.)
-    if status == "completed":
-        user = await db.posts.get_user_by_job_id(job_id)
-        await send_push_notification(
-            user_id=user.id,
-            title="Your Roast Video is Ready! 🔥",
-            body="Check out your hilarious pet roast!"
-        )
-
-    return {"status": "ok"}
-```
-
-### Register Webhook URL
-
-Configure in Pet Roast AI or manually via API (if supported by Revid).
-
----
-
-## 📦 Example Backend Client
-
-See `examples/backend_client.py` for a complete, production-ready client library.
-
-```python
-from examples.backend_client import PetRoastClient
-
-# Initialize client
-client = PetRoastClient(base_url="http://localhost:8000")
-
-# Generate video with automatic pet detection
-result = await client.generate_video_with_retry(
-    image_url="https://cdn.example.com/pets/dog.jpg",
-    prompt="Roast my lazy dog!",
-    max_retries=3
-)
-
-if result["success"]:
-    print(f"Video URL: {result['video_url']}")
-else:
-    print(f"Error: {result['error']}")
-```
-
----
-
-## 🚀 Deployment Guide
-
-### Option 1: Docker Compose (Recommended for POC)
-
-```yaml
-# docker-compose.yml
-version: '3.8'
-
-services:
-  pet-roast-ai:
-    build: .
-    ports:
-      - "8000:8000"
-    environment:
-      - REVID_API_KEY=${REVID_API_KEY}
-      - REDIS_URL=redis://redis:6379/0
-      - USE_REDIS=true
-    depends_on:
-      - redis
-
-  redis:
-    image: redis:7-alpine
-    ports:
-      - "6379:6379"
-
-  indictrans2:
-    build: ./IndicTrans2
-    ports:
-      - "5000:5000"
-    command: python inference_server_simple.py
-```
-
-Run:
-```bash
-docker-compose up -d
-```
-
----
-
-### Option 2: Kubernetes (Production)
-
-```yaml
-# k8s-deployment.yaml
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: pet-roast-ai
-spec:
-  replicas: 3
-  selector:
-    matchLabels:
-      app: pet-roast-ai
-  template:
-    metadata:
-      labels:
-        app: pet-roast-ai
-    spec:
-      containers:
-      - name: api
-        image: your-registry/pet-roast-ai:latest
-        ports:
-        - containerPort: 8000
-        env:
-        - name: REVID_API_KEY
-          valueFrom:
-            secretKeyRef:
-              name: pet-roast-secrets
-              key: revid-api-key
-        - name: REDIS_URL
-          value: "redis://redis-service:6379/0"
-        livenessProbe:
-          httpGet:
-            path: /healthz
-            port: 8000
-          initialDelaySeconds: 30
-          periodSeconds: 10
----
-apiVersion: v1
-kind: Service
-metadata:
-  name: pet-roast-ai
-spec:
-  selector:
-    app: pet-roast-ai
-  ports:
-  - port: 80
-    targetPort: 8000
-  type: LoadBalancer
-```
-
----
-
-## ⚠️ Error Handling
-
-### Common Error Codes
-
-| Status Code | Error | Meaning | Action |
-|-------------|-------|---------|--------|
-| 400 | `no_pets_detected` | No pets found in image | Ask user to upload pet photo |
-| 404 | `Job ID not found` | Invalid job_id | Check job_id or generate new video |
-| 409 | `Video still processing` | Not ready yet | Poll again or wait for webhook |
-| 502 | `AI4Bharat/Revid error` | External API failure | Retry request |
-
-### Retry Strategy
-
-```python
-import asyncio
-from tenacity import retry, stop_after_attempt, wait_exponential
-
-@retry(
-    stop=stop_after_attempt(3),
-    wait=wait_exponential(multiplier=1, min=2, max=10)
-)
-async def generate_video_with_retry(image_url: str, prompt: str):
-    async with httpx.AsyncClient() as client:
-        response = await client.post(
-            "http://pet-roast-ai:8000/api/generate-video",
-            json={"text": prompt, "image_url": image_url}
-        )
-        response.raise_for_status()
-        return response.json()
-```
-
----
-
-## 📊 Monitoring & Metrics
-
-### Health Checks
-
-```python
-# Add to your monitoring system
-async def check_pet_roast_health():
-    async with httpx.AsyncClient() as client:
-        response = await client.get("http://pet-roast-ai:8000/healthz")
-        return response.status_code == 200
-```
-
-### Key Metrics to Track
-
-1. **Pet Detection Rate:** % of images with pets detected
-2. **Video Generation Success Rate:** % of jobs completed successfully
-3. **Average Processing Time:** Time from job creation to completion
-4. **API Response Times:** Latency for each endpoint
-
----
-
-## 🔐 Security Best Practices
-
-1. **API Keys:** Store `REVID_API_KEY` in environment variables or secret managers
-2. **Webhook Signatures:** Always verify webhook signatures
-3. **Rate Limiting:** Implement rate limiting on your backend to prevent abuse
-4. **Image Validation:** Validate image URLs before sending to API
-5. **HTTPS:** Use HTTPS in production for all API calls
-
----
-
-## 📞 Support & Next Steps
-
-### POC Checklist
-
-- [ ] Deploy Pet Roast AI service (Docker/K8s)
-- [ ] Test `/api/generate-video` with sample pet images
-- [ ] Verify pet detection rejects non-pet images
-- [ ] Implement webhook handler in your backend
-- [ ] Test end-to-end flow: upload → generate → webhook → display
-- [ ] Monitor error rates and performance
-- [ ] Add retry logic for failed jobs
-- [ ] Integrate with your app's UI
-
-### Need Help?
-
-- Review `examples/backend_client.py` for reference implementation
-- Check logs: `docker logs pet-roast-ai`
-- Test endpoints with Postman/Insomnia
-- Read API schemas in `app/schemas.py`
-
----
-
-## 🎉 Quick Start Example
+### 2. Test Video Generation (with valid pet image)
 
 ```bash
-# 1. Start the service
-docker-compose up -d
-
-# 2. Test pet detection
-curl -X POST http://localhost:8000/api/generate-video \
+curl -X POST https://your-ai-service.up.railway.app/api/generate-video \
   -H "Content-Type: application/json" \
   -d '{
-    "text": "Roast my dog",
+    "text": "Roast my lazy dog!",
     "image_url": "https://example.com/dog.jpg"
   }'
 
-# 3. Check status
-curl http://localhost:8000/api/video-status/{job_id}
-
-# 4. Get result
-curl http://localhost:8000/api/video-result/{job_id}
+# Expected (202):
+# {
+#   "job_id": "abc123",
+#   "status": "queued"
+# }
 ```
 
-**That's it! You're ready to integrate Pet Roast AI with your backend! 🚀**
+### 3. Test No Pets Detection
+
+```bash
+curl -X POST https://your-ai-service.up.railway.app/api/generate-video \
+  -H "Content-Type: application/json" \
+  -d '{
+    "text": "Test",
+    "image_url": "https://example.com/no-pets.jpg"
+  }'
+
+# Expected (400):
+# {
+#   "detail": {
+#     "error": "no_pets_detected",
+#     "message": "No pets found in the uploaded image...",
+#     "suggestion": "Try uploading a clear photo or video of your pet."
+#   }
+# }
+```
+
+### 4. Test Video Status
+
+```bash
+curl https://your-ai-service.up.railway.app/api/video-status/abc123
+
+# Expected:
+# {
+#   "job_id": "abc123",
+#   "status": "processing",
+#   "detail": null,
+#   "updated_at": "2025-12-07T10:00:00Z"
+# }
+```
+
+### 5. Test Backend Webhook (Manual)
+
+```bash
+curl -X POST https://your-backend.railway.app/webhooks/pet-roast-complete \
+  -H "Content-Type: application/json" \
+  -d '{
+    "job_id": "abc123",
+    "status": "completed",
+    "video_url": "https://revid.ai/videos/abc123.mp4"
+  }'
+
+# Expected:
+# {
+#   "status": "success",
+#   "message": "Job abc123 updated successfully"
+# }
+```
+
+---
+
+## 📊 Monitoring & Logging
+
+### AI Service Logs
+
+```bash
+railway logs --service ai-service
+```
+
+**Key log messages to monitor:**
+- ✅ `Pets detected: dog, cat`
+- ✅ `Updated job abc123 status: completed`
+- ✅ `Notified backend about job abc123`
+- ❌ `No pets detected in image: https://...`
+- ❌ `Failed to notify backend: Connection timeout`
+
+### Backend Logs
+
+```typescript
+// Add structured logging
+console.log('📥 Webhook received:', {
+  jobId: payload.job_id,
+  status: payload.status,
+  timestamp: new Date().toISOString()
+});
+
+console.log('✅ Job updated:', {
+  jobId: roastJob.id,
+  status: roastJob.status,
+  videoUrl: roastJob.videoUrl
+});
+
+console.log('🔔 Notification sent:', {
+  userId: user.id,
+  notificationType: 'video_ready'
+});
+```
+
+---
+
+## ✅ Integration Checklist
+
+### AI Service Setup
+- [ ] Deploy AI service to Railway
+- [ ] Add Redis addon
+- [ ] Set `REVID_API_KEY` environment variable
+- [ ] Set `BACKEND_WEBHOOK_URL` to your backend webhook endpoint
+- [ ] Set `CORS_ORIGINS` to include backend URL
+- [ ] Test `/healthz` endpoint
+- [ ] Test `/api/generate-video` with pet image
+
+### Backend Setup
+- [ ] Set `AI_SERVICE_URL` environment variable
+- [ ] Implement GraphQL mutation `generatePetRoast`
+- [ ] Create webhook endpoint `/webhooks/pet-roast-complete`
+- [ ] Implement notification service
+- [ ] Add error handling for no pets detected
+- [ ] Test webhook handler manually
+- [ ] Configure CORS to allow AI service
+
+### End-to-End Testing
+- [ ] Generate video from mobile app
+- [ ] Verify job stored in backend database
+- [ ] Check AI service processes video
+- [ ] Confirm webhook received by backend
+- [ ] Verify push notification sent to user
+- [ ] Test error scenarios (no pets, timeout, failure)
+
+---
+
+## 🎯 Quick Reference
+
+| Action | Endpoint | Method |
+|--------|----------|--------|
+| Generate video | `/api/generate-video` | POST |
+| Check status | `/api/video-status/{job_id}` | GET |
+| Webhook callback | `/webhooks/pet-roast-complete` | POST |
+| Health check | `/healthz` | GET |
+
+---
+
+## 📞 Support
+
+For issues or questions:
+1. Check Railway logs: `railway logs`
+2. Review error messages in response
+3. Verify environment variables are set correctly
+4. Test each endpoint individually
+
+---
+
+**Last Updated:** December 7, 2025
+**Version:** 1.0.0

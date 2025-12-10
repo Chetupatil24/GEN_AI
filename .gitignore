@@ -4,40 +4,43 @@ __pycache__/
 *$py.class
 *.so
 .Python
-*.egg-info/
-dist/
-build/
-.venv/
+env/
 venv/
 ENV/
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
 
-# Environment variables
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+
+# Jupyter
+.ipynb_checkpoints
+
+# Environment
 .env
-
-# IDEs
-.vscode/
-.idea/
-*.swp
-*.swo
-
-# OS
-.DS_Store
-Thumbs.db
+.env.local
 
 # Logs
 *.log
-/tmp/
 
-# Large binary files
-*.deb
-cloudflared.deb
+# Model weights (if cached)
+yolov5*.pt
 
-# Temporary files
-nohup.out
-
-# Cache
-.pytest_cache/
-.mypy_cache/
-
-# Node modules (if any)
-node_modules/
+# OS
+.DS_Store
