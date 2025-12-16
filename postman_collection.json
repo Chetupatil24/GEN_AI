@@ -1,0 +1,237 @@
+{
+    "info": {
+        "name": "Pet Roast AI Service",
+        "description": "Complete API collection for testing Pet Roast AI Service with Revid.ai integration, pet detection, and backend webhooks",
+        "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+    },
+    "variable": [
+        {
+            "key": "base_url",
+            "value": "http://localhost:8000",
+            "type": "string"
+        },
+        {
+            "key": "job_id",
+            "value": "",
+            "type": "string"
+        },
+        {
+            "key": "backend_url",
+            "value": "https://your-backend.railway.app",
+            "type": "string"
+        }
+    ],
+    "item": [
+        {
+            "name": "1. Health Check",
+            "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                    "raw": "{{base_url}}/healthz",
+                    "host": [
+                        "{{base_url}}"
+                    ],
+                    "path": [
+                        "healthz"
+                    ]
+                },
+                "description": "Check if the service is running and healthy"
+            },
+            "response": []
+        },
+        {
+            "name": "2. Test Backend Connection",
+            "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                    "raw": "{{base_url}}/api/test-backend-connection",
+                    "host": [
+                        "{{base_url}}"
+                    ],
+                    "path": [
+                        "api",
+                        "test-backend-connection"
+                    ]
+                },
+                "description": "Test connectivity to the backend webhook URL"
+            },
+            "response": []
+        },
+        {
+            "name": "3. Generate Video (with Pet Detection)",
+            "event": [
+                {
+                    "listen": "test",
+                    "script": {
+                        "exec": [
+                            "if (pm.response.code === 202) {",
+                            "    var jsonData = pm.response.json();",
+                            "    pm.collectionVariables.set('job_id', jsonData.job_id);",
+                            "    pm.test('Job ID saved: ' + jsonData.job_id, function() {",
+                            "        pm.expect(jsonData.job_id).to.be.a('string');",
+                            "    });",
+                            "}"
+                        ],
+                        "type": "text/javascript"
+                    }
+                }
+            ],
+            "request": {
+                "method": "POST",
+                "header": [
+                    {
+                        "key": "Content-Type",
+                        "value": "application/json"
+                    }
+                ],
+                "body": {
+                    "mode": "raw",
+                    "raw": "{\n  \"text\": \"Roast my adorable lazy pet!\",\n  \"image_url\": \"https://images.unsplash.com/photo-1543466835-00a7907e9de1\"\n}"
+                },
+                "url": {
+                    "raw": "{{base_url}}/api/generate-video",
+                    "host": [
+                        "{{base_url}}"
+                    ],
+                    "path": [
+                        "api",
+                        "generate-video"
+                    ]
+                },
+                "description": "Generate a pet roast video. Validates pets are present in the image before processing."
+            },
+            "response": []
+        },
+        {
+            "name": "4. Check Video Status",
+            "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                    "raw": "{{base_url}}/api/video-status/{{job_id}}",
+                    "host": [
+                        "{{base_url}}"
+                    ],
+                    "path": [
+                        "api",
+                        "video-status",
+                        "{{job_id}}"
+                    ]
+                },
+                "description": "Check the status of a video generation job. Use the job_id from generate-video response."
+            },
+            "response": []
+        },
+        {
+            "name": "5. Translate Text (AI4Bharat)",
+            "request": {
+                "method": "POST",
+                "header": [
+                    {
+                        "key": "Content-Type",
+                        "value": "application/json"
+                    }
+                ],
+                "body": {
+                    "mode": "raw",
+                    "raw": "{\n  \"text\": \"मेरे कुत्ते को भुनाओ\",\n  \"source_lang\": \"hi\",\n  \"target_lang\": \"en\",\n  \"task\": \"translation\"\n}"
+                },
+                "url": {
+                    "raw": "{{base_url}}/api/translate-text",
+                    "host": [
+                        "{{base_url}}"
+                    ],
+                    "path": [
+                        "api",
+                        "translate-text"
+                    ]
+                },
+                "description": "Translate text using AI4Bharat/IndicTrans2. Supports Indian languages."
+            },
+            "response": []
+        },
+        {
+            "name": "6. Webhook - Video Complete (Simulated)",
+            "request": {
+                "method": "POST",
+                "header": [
+                    {
+                        "key": "Content-Type",
+                        "value": "application/json"
+                    },
+                    {
+                        "key": "X-Webhook-Source",
+                        "value": "revid-ai"
+                    }
+                ],
+                "body": {
+                    "mode": "raw",
+                    "raw": "{\n  \"job_id\": \"{{job_id}}\",\n  \"status\": \"completed\",\n  \"video_url\": \"https://example.com/test-video.mp4\"\n}"
+                },
+                "url": {
+                    "raw": "{{base_url}}/api/webhook/video-complete",
+                    "host": [
+                        "{{base_url}}"
+                    ],
+                    "path": [
+                        "api",
+                        "webhook",
+                        "video-complete"
+                    ]
+                },
+                "description": "Simulate a webhook callback from Revid.ai when video is complete"
+            },
+            "response": []
+        },
+        {
+            "name": "7. Generate Video - No Pets (Error Test)",
+            "request": {
+                "method": "POST",
+                "header": [
+                    {
+                        "key": "Content-Type",
+                        "value": "application/json"
+                    }
+                ],
+                "body": {
+                    "mode": "raw",
+                    "raw": "{\n  \"text\": \"Test with no pets\",\n  \"image_url\": \"https://images.unsplash.com/photo-1506905925346-21bda4d32df4\"\n}"
+                },
+                "url": {
+                    "raw": "{{base_url}}/api/generate-video",
+                    "host": [
+                        "{{base_url}}"
+                    ],
+                    "path": [
+                        "api",
+                        "generate-video"
+                    ]
+                },
+                "description": "Test error handling when no pets are detected in the image"
+            },
+            "response": []
+        },
+        {
+            "name": "8. Get Video Result",
+            "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                    "raw": "{{base_url}}/api/video-result/{{job_id}}",
+                    "host": [
+                        "{{base_url}}"
+                    ],
+                    "path": [
+                        "api",
+                        "video-result",
+                        "{{job_id}}"
+                    ]
+                },
+                "description": "Get the final video URL once generation is complete"
+            },
+            "response": []
+        }
+    ]
+}
