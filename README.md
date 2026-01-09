@@ -1,3 +1,4 @@
+# GEN_AI
 # 🎬 Pet Roast AI Service
 
 > AI-powered pet roasting service with YOLOv5 pet detection, multi-language support, and video generation.
@@ -6,22 +7,41 @@
 [![FastAPI](https://img.shields.io/badge/FastAPI-009688)](https://fastapi.tiangolo.com/)
 [![Python](https://img.shields.io/badge/Python-3.10-blue)](https://www.python.org/)
 
-## 🚀 Quick Deploy to Railway
+## 🚀 Quick Deploy & Connect to Backend
 
+### Step 1: Deploy AI Service
 ```bash
-# 1. Push to GitHub
-git add .
-git commit -m "Deploy AI service"
-git push origin main
-
-# 2. Deploy on Railway
-# - Go to https://railway.app
-# - New Project → Deploy from GitHub
-# - Select this repository
-# - Railway auto-detects Dockerfile
+# Already pushed to GitHub ✅
+# Now deploy to Railway:
+# 1. Go to https://railway.app/dashboard
+# 2. New Project → Deploy from GitHub
+# 3. Select: Chetupatil24/GEN_AI
+# 4. Railway auto-detects Dockerfile ✅
 ```
 
-**See full guide:** [RAILWAY_DEPLOYMENT.md](RAILWAY_DEPLOYMENT.md)
+### Step 2: Configure Environment
+```env
+REVID_API_KEY=your_revid_key
+BACKEND_WEBHOOK_URL=https://your-backend.railway.app/api/webhooks/video-complete
+REDIS_URL=redis://default:xxx@redis.railway.internal:6379
+USE_REDIS=true
+CORS_ORIGINS=["https://your-backend.railway.app"]
+```
+
+### Step 3: Get Your Endpoints
+```
+AI Service URL: https://your-ai-service.up.railway.app
+
+Key Endpoints:
+- POST /api/generate-video    → Generate pet roast video
+- GET  /api/video-status/{id} → Check video status
+- POST /api/webhook/video-complete → Webhook (AI → Backend)
+```
+
+**📚 Complete Guides:**
+- [DEPLOY_AND_CONNECT.md](DEPLOY_AND_CONNECT.md) - Full deployment & integration guide
+- [ENDPOINTS.md](ENDPOINTS.md) - All API endpoints with examples
+- [backend_example.js](backend_example.js) - Complete backend implementation
 
 ## 📁 Project Structure
 
