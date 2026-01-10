@@ -1,318 +1,541 @@
-# GEN_AI
-# 🎬 Pet Roast AI Service
+# 🐾 Pet Roast AI Service
 
-> AI-powered pet roasting service with YOLOv5 pet detection, multi-language support, and video generation.
+> AI-powered pet roasting service with YOLOv5 pet detection, multi-language translation, and video generation capabilities.
 
-[![Railway](https://img.shields.io/badge/Deploy%20on-Railway-blueviolet)](https://railway.app)
-[![FastAPI](https://img.shields.io/badge/FastAPI-009688)](https://fastapi.tiangolo.com/)
-[![Python](https://img.shields.io/badge/Python-3.10-blue)](https://www.python.org/)
+[![FastAPI](https://img.shields.io/badge/FastAPI-0.115.0-009688?style=flat&logo=fastapi)](https://fastapi.tiangolo.com/)
+[![Python](https://img.shields.io/badge/Python-3.10+-blue?style=flat&logo=python)](https://www.python.org/)
+[![Railway](https://img.shields.io/badge/Deploy%20on-Railway-blueviolet?style=flat&logo=railway)](https://railway.app)
+[![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 
-## 🚀 Quick Deploy & Connect to Backend
+## 📋 Table of Contents
 
-### Step 1: Deploy AI Service
+- [Features](#-features)
+- [Tech Stack](#-tech-stack)
+- [Local Development Setup](#-local-development-setup)
+- [Railway Deployment](#-railway-deployment)
+- [API Endpoints](#-api-endpoints)
+- [Environment Variables](#-environment-variables)
+- [Project Structure](#-project-structure)
+- [Testing](#-testing)
+- [Contributing](#-contributing)
+
+---
+
+## ✨ Features
+
+- 🤖 **AI-Powered Pet Detection** - Uses YOLOv5 to detect and identify pets in images
+- 🌐 **Multi-Language Support** - Translates roasts using AI4Bharat/Sarvam APIs
+- 🎬 **Video Generation** - Creates engaging roast videos via Revid.ai
+- 📦 **Job Management** - Redis-backed persistent job storage with TTL
+- 🔔 **Webhook System** - Notifies backend when video processing completes
+- ⚡ **Async Processing** - Non-blocking video generation with status tracking
+- 🎨 **Streamlit UI** - Interactive web interface for local testing
+
+---
+
+## 🛠 Tech Stack
+
+| Category | Technologies |
+|----------|-------------|
+| **Backend** | FastAPI, Uvicorn, Python 3.10+ |
+| **AI/ML** | PyTorch, YOLOv5, Torchvision, OpenCV |
+| **Database** | Redis (job storage & caching) |
+| **APIs** | Revid.ai, AI4Bharat, Sarvam |
+| **Deployment** | Railway, Docker |
+| **Testing** | Pytest, Pytest-asyncio |
+
+---
+
+## 🚀 Local Development Setup
+
+### Prerequisites
+
+- **Python**: 3.10 or higher
+- **Redis**: Running instance (localhost:6379)
+- **Git**: Version control
+- **API Keys**: 
+  - Revid.ai API key
+  - AI4Bharat API key (optional)
+  - Sarvam API key (optional)
+
+### Step 1: Clone the Repository
+
 ```bash
-# Already pushed to GitHub ✅
-# Now deploy to Railway:
-# 1. Go to https://railway.app/dashboard
-# 2. New Project → Deploy from GitHub
-# 3. Select: Chetupatil24/GEN_AI
-# 4. Railway auto-detects Dockerfile ✅
+git clone https://github.com/Chetupatil24/GEN_AI.git
+cd GEN_AI
 ```
 
-### Step 2: Configure Environment
+### Step 2: Create Virtual Environment
+
+```bash
+# Create virtual environment
+python3 -m venv venv
+
+# Activate virtual environment
+# On Linux/Mac:
+source venv/bin/activate
+
+# On Windows:
+venv\Scripts\activate
+```
+
+### Step 3: Install Dependencies
+
+```bash
+# Upgrade pip
+pip install --upgrade pip
+
+# Install all dependencies
+pip install -r requirements.txt
+```
+
+**Note**: PyTorch installation may vary based on your system. Visit [PyTorch.org](https://pytorch.org/get-started/locally/) for specific installation commands.
+
+### Step 4: Install and Start Redis
+
+**Ubuntu/Debian:**
+```bash
+sudo apt update
+sudo apt install redis-server
+sudo systemctl start redis-server
+sudo systemctl enable redis-server
+
+# Verify Redis is running
+redis-cli ping  # Should return "PONG"
+```
+
+**macOS:**
+```bash
+brew install redis
+brew services start redis
+
+# Verify
+redis-cli ping
+```
+
+**Windows:**
+```bash
+# Use WSL or download from: https://redis.io/download
+```
+
+### Step 5: Configure Environment Variables
+
+Create a `.env` file in the root directory:
+
+```bash
+cp .env.example .env
+```
+
+Edit `.env` with your configuration:
+
 ```env
-REVID_API_KEY=your_revid_key
-BACKEND_WEBHOOK_URL=https://your-backend.railway.app/api/webhooks/video-complete
-REDIS_URL=redis://default:xxx@redis.railway.internal:6379
+# API Configuration
+REVID_API_KEY=your_revid_api_key_here
+AI4BHARAT_API_KEY=your_ai4bharat_key_here
+SARVAM_API_KEY=your_sarvam_key_here
+
+# Redis Configuration (Local)
+REDIS_URL=redis://localhost:6379
 USE_REDIS=true
-CORS_ORIGINS=["https://your-backend.railway.app"]
+REDIS_JOB_TTL_SECONDS=86400
+
+# Server Configuration
+HOST=0.0.0.0
+PORT=8000
+REQUEST_TIMEOUT_SECONDS=30.0
+
+# Webhook & CORS
+BACKEND_WEBHOOK_URL=http://localhost:3000/webhooks/video-complete
+CORS_ORIGINS=["http://localhost:3000","http://localhost:8501"]
+
+# Retry Configuration
+MAX_RETRIES=3
+RETRY_BACKOFF_FACTOR=2.0
 ```
 
-### Step 3: Get Your Endpoints
-```
-AI Service URL: https://your-ai-service.up.railway.app
+### Step 6: Start the Backend Server
 
-Key Endpoints:
-- POST /api/generate-video    → Generate pet roast video
-- GET  /api/video-status/{id} → Check video status
-- POST /api/webhook/video-complete → Webhook (AI → Backend)
+```bash
+# Start FastAPI server
+python3 -m uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+
+# Server will be available at:
+# - API: http://localhost:8000
+# - Docs: http://localhost:8000/docs
 ```
 
-**📚 Complete Guides:**
-- [DEPLOY_AND_CONNECT.md](DEPLOY_AND_CONNECT.md) - Full deployment & integration guide
-- [ENDPOINTS.md](ENDPOINTS.md) - All API endpoints with examples
-- [backend_example.js](backend_example.js) - Complete backend implementation
+### Step 7: Start Streamlit UI (Optional)
+
+In a new terminal:
+
+```bash
+# Activate virtual environment
+source venv/bin/activate
+
+# Start Streamlit
+streamlit run streamlit_app.py
+
+# UI will be available at:
+# - http://localhost:8501
+```
+
+### Step 8: Verify Installation
+
+```bash
+# Check health endpoint
+curl http://localhost:8000/healthz
+
+# Should return: {"status":"ok"}
+```
+
+---
+
+## 🚂 Railway Deployment
+
+### Quick Deploy to Railway
+
+1. **Fork/Clone this repository** to your GitHub account
+
+2. **Go to Railway Dashboard**
+   ```
+   https://railway.app/dashboard
+   ```
+
+3. **Create New Project**
+   - Click "New Project"
+   - Select "Deploy from GitHub repo"
+   - Choose your forked repository
+   - Railway will auto-detect the `Dockerfile` ✅
+
+4. **Add Redis Service**
+   - In your project, click "New"
+   - Select "Database" → "Redis"
+   - Railway will automatically set `REDIS_URL` environment variable
+
+5. **Configure Environment Variables**
+   
+   In Railway project settings, add these variables:
+
+   ```env
+   REVID_API_KEY=your_revid_api_key
+   AI4BHARAT_API_KEY=your_ai4bharat_key
+   SARVAM_API_KEY=your_sarvam_key
+   USE_REDIS=true
+   REDIS_JOB_TTL_SECONDS=86400
+   BACKEND_WEBHOOK_URL=https://your-backend.railway.app/webhooks/video-complete
+   CORS_ORIGINS=["https://your-backend.railway.app"]
+   ```
+
+   **Note**: Railway automatically sets `REDIS_URL` when you add Redis service.
+
+6. **Deploy**
+   - Railway automatically deploys on every git push
+   - Get your deployment URL: `https://your-service.up.railway.app`
+
+7. **Verify Deployment**
+   ```bash
+   curl https://your-service.up.railway.app/healthz
+   ```
+
+### Railway Configuration Files
+
+The project includes these Railway-specific files:
+
+- **`Dockerfile`** - Container configuration for Railway
+- **`railway.json`** - Railway build and deploy settings
+- **`.env.railway`** - Environment variable template
+
+### Continuous Deployment
+
+```bash
+# Make changes and push
+git add .
+git commit -m "Update feature"
+git push origin main
+
+# Railway automatically redeploys
+```
+
+---
+
+## 📡 API Endpoints
+
+### Health Check
+```http
+GET /healthz
+```
+**Response:**
+```json
+{"status": "ok"}
+```
+
+### Generate Video
+```http
+POST /api/generate-video
+Content-Type: application/json
+
+{
+  "text": "Roast my lazy dog!",
+  "image_url": "https://example.com/dog.jpg",
+  "webhook_url": "https://optional-webhook.com/callback"
+}
+```
+**Response:**
+```json
+{
+  "job_id": "abc123def456",
+  "status": "processing"
+}
+```
+
+### Check Video Status
+```http
+GET /api/video-status/{job_id}
+```
+**Response:**
+```json
+{
+  "job_id": "abc123def456",
+  "status": "completed",
+  "video_url": "https://revid.ai/video/xyz.mp4",
+  "created_at": "2026-01-10T10:30:00Z"
+}
+```
+
+### Get Video Result
+```http
+GET /api/video-result/{job_id}
+```
+**Response:**
+```json
+{
+  "job_id": "abc123def456",
+  "status": "completed",
+  "video_url": "https://revid.ai/video/xyz.mp4"
+}
+```
+
+### Translate Text
+```http
+POST /api/translate-text
+Content-Type: application/json
+
+{
+  "text": "Hello, how are you?",
+  "source_language": "eng_Latn",
+  "target_language": "hin_Deva"
+}
+```
+
+### Video Completion Webhook (Internal)
+```http
+POST /api/webhook/video-complete
+Content-Type: application/json
+
+{
+  "job_id": "abc123def456",
+  "status": "completed",
+  "video_url": "https://revid.ai/video/xyz.mp4"
+}
+```
+
+📚 **Full API Documentation**: Visit `/docs` endpoint when server is running
+
+---
+
+## 🔐 Environment Variables
+
+| Variable | Description | Required | Default |
+|----------|-------------|----------|---------|
+| `REVID_API_KEY` | Revid.ai API key for video generation | ✅ Yes | - |
+| `AI4BHARAT_API_KEY` | AI4Bharat translation API key | ⚠️ Optional | - |
+| `SARVAM_API_KEY` | Sarvam translation API key | ⚠️ Optional | - |
+| `REDIS_URL` | Redis connection URL | ✅ Yes | `redis://localhost:6379` |
+| `USE_REDIS` | Enable Redis job storage | No | `true` |
+| `REDIS_JOB_TTL_SECONDS` | Job expiration time in Redis | No | `86400` (24h) |
+| `BACKEND_WEBHOOK_URL` | Backend webhook for notifications | No | - |
+| `CORS_ORIGINS` | Allowed CORS origins (JSON array) | No | `["*"]` |
+| `HOST` | Server host | No | `0.0.0.0` |
+| `PORT` | Server port | No | `8000` |
+| `REQUEST_TIMEOUT_SECONDS` | HTTP request timeout | No | `30.0` |
+| `MAX_RETRIES` | API retry attempts | No | `3` |
+| `RETRY_BACKOFF_FACTOR` | Retry backoff multiplier | No | `2.0` |
+
+---
 
 ## 📁 Project Structure
 
 ```
 pet_roasts/
 ├── app/
+│   ├── __init__.py
+│   ├── main.py                    # FastAPI application entry point
+│   ├── dependencies.py            # Dependency injection
+│   ├── schemas.py                 # Pydantic models
+│   │
 │   ├── api/
-│   │   └── routes.py              # API endpoints
-│   ├── services/
-│   │   ├── pet_detection.py       # YOLOv5 detection
-│   │   └── job_store.py           # Job management
+│   │   ├── __init__.py
+│   │   └── routes.py              # API route handlers
+│   │
 │   ├── clients/
-│   │   ├── revid.py               # Video generation
-│   │   └── ai4bharat.py           # Translation
+│   │   ├── ai4bharat.py           # AI4Bharat translation client
+│   │   ├── revid.py               # Revid video generation client
+│   │   └── sarvam.py              # Sarvam translation client
+│   │
 │   ├── core/
-│   │   ├── config.py              # Configuration
+│   │   ├── config.py              # Configuration management
+│   │   ├── exceptions.py          # Custom exceptions
 │   │   └── webhook.py             # Webhook utilities
-│   └── main.py                    # FastAPI app
+│   │
+│   └── services/
+│       ├── job_store.py           # In-memory job storage
+│       ├── redis_job_store.py     # Redis job storage
+│       └── pet_detection.py       # YOLOv5 pet detection
 │
-├── Dockerfile                      # Railway deployment
-├── railway.json                    # Railway config
-├── requirements.txt                # Dependencies
-└── .env.railway                    # Environment template
+├── IndicTrans2/                   # Translation model (submodule)
+├── .env.example                   # Environment template
+├── .env.railway                   # Railway env template
+├── .gitignore                     # Git ignore rules
+├── Dockerfile                     # Docker container config
+├── railway.json                   # Railway deployment config
+├── requirements.txt               # Python dependencies
+├── streamlit_app.py               # Streamlit web UI
+└── README.md                      # This file
 ```
 
-## 🎯 API Endpoints
+---
 
-### Health Check
-```bash
-GET /healthz
-```
+## 🧪 Testing
 
-### Generate Video (with Pet Detection)
-```bash
-POST /api/generate-video
-Content-Type: application/json
-
-{
-  "text": "Roast my lazy dog!",
-  "image_url": "https://example.com/dog.jpg"
-}
-
-Response:
-{
-  "job_id": "abc123",
-  "status": "processing"
-}
-```
-
-### Check Video Status
-```bash
-GET /api/video-status/{job_id}
-
-Response:
-{
-  "job_id": "abc123",
-  "status": "completed",
-  "video_url": "https://...",
-  "created_at": "2025-12-07T10:00:00Z"
-}
-```
-
-### Webhook (Called by Revid when video is ready)
-```bash
-POST /api/webhook/video-complete
-
-{
-  "job_id": "abc123",
-  "status": "completed",
-  "video_url": "https://..."
-}
-```
-
-## 🔧 Configuration
-
-Required environment variables:
-
-```env
-# Revid.ai API (REQUIRED)
-REVID_API_KEY=your_revid_api_key
-
-# Backend webhook (Your Railway backend URL)
-BACKEND_WEBHOOK_URL=https://your-backend.railway.app/webhooks/pet-roast-complete
-
-# CORS origins
-CORS_ORIGINS=["https://your-backend.railway.app"]
-
-# Redis (Use Railway addon)
-REDIS_URL=redis://default:password@redis.railway.internal:6379
-USE_REDIS=true
-```
-
-## 🏗️ Architecture
-
-```
-┌─────────────────────────────────────────────────────────────┐
-│              Mobile App / Frontend                           │
-└────────────────────────┬────────────────────────────────────┘
-                         │ GraphQL
-                         ▼
-┌─────────────────────────────────────────────────────────────┐
-│         Backend (Railway)                                    │
-│         https://your-backend.railway.app                     │
-└────────────────┬────────────────────────────────────────────┘
-                 │ REST API POST /api/generate-video
-                 ▼
-┌─────────────────────────────────────────────────────────────┐
-│       Pet Roast AI (Railway) - THIS SERVICE                  │
-│       https://your-ai-service.up.railway.app                 │
-│                                                              │
-│  1. Pet Detection (YOLOv5)        ✓                         │
-│  2. Translation (AI4Bharat)       ✓                         │
-│  3. Video Generation (Revid.ai)   ✓                         │
-│  4. Webhook Backend               ✓                         │
-└──────┬──────────────────────────────────────────────────────┘
-       │
-       ├─→ Redis (Job Queue)
-       └─→ Revid.ai API
-```
-
-## ✨ Features
-
-- ✅ **Pet Detection** - YOLOv5 validates pets before processing
-- ✅ **Multi-language** - AI4Bharat/IndicTrans2 translation support
-- ✅ **Video Generation** - Revid.ai integration
-- ✅ **Job Queue** - Redis-backed persistent storage
-- ✅ **Webhook Support** - Notifies backend when video is ready
-- ✅ **Health Monitoring** - Built-in health checks
-- ✅ **CORS Configured** - Ready for frontend integration
-- ✅ **Railway Ready** - Optimized for Railway deployment
-
-## 🧪 Local Development
+### Run Tests
 
 ```bash
-# Install dependencies
-pip install -r requirements.txt
+# Run all tests
+pytest
 
-# Set environment variables
-cp .env.railway .env
-# Edit .env with your keys
+# Run with coverage
+pytest --cov=app --cov-report=html
 
-# Run locally
-uvicorn app.main:app --reload --port 8000
-
-# Test
-curl http://localhost:8000/healthz
+# Run specific test file
+pytest test_integration.py -v
 ```
 
-## 🔗 Testing Integration
+### Manual Testing with cURL
 
-Test the complete integration between AI service and backend:
-
+**Generate Video:**
 ```bash
-# Install test dependencies (if not already installed)
-pip install httpx
-
-# Run integration tests
-python test_integration.py \
-  --ai-service-url https://your-ai-service.railway.app \
-  --backend-url https://your-backend.railway.app \
-  --test-image https://example.com/dog.jpg
+curl -X POST http://localhost:8000/api/generate-video \
+  -H "Content-Type: application/json" \
+  -d '{
+    "text": "Roast my lazy cat!",
+    "image_url": "https://example.com/cat.jpg"
+  }'
 ```
 
-The test suite will verify:
-- ✅ AI service health
-- ✅ Backend connectivity
-- ✅ Pet detection
-- ✅ Video generation
-- ✅ Webhook delivery
-
-## 📊 Monitoring
-
-### View Logs (Railway)
+**Check Status:**
 ```bash
-railway logs
+curl http://localhost:8000/api/video-status/YOUR_JOB_ID
 ```
 
-### Check Status
-```bash
-railway status
-```
+### Using Streamlit UI
 
-## 🐛 Troubleshooting
+1. Start Streamlit: `streamlit run streamlit_app.py`
+2. Open browser: http://localhost:8501
+3. Upload pet image and enter roast text
+4. Click "Generate Roast Video"
+5. Monitor status and download video when ready
 
-### No Pets Detected Error
-- Ensure image contains clear pet photos
-- Supported: dog, cat, bird, horse, sheep, cow, elephant, bear, zebra, giraffe
+---
 
-### Backend Not Receiving Webhook
-- Verify `BACKEND_WEBHOOK_URL` is set correctly
-- Check backend webhook endpoint is accessible
-- Review logs: `railway logs`
+## 🔧 Troubleshooting
 
 ### Redis Connection Failed
-- Add Redis addon in Railway dashboard
-- Check `REDIS_URL` is set automatically
 
-## 🔗 Integration with Backend
+```bash
+# Check if Redis is running
+redis-cli ping
 
-Your Railway backend should call this service:
+# Start Redis
+sudo systemctl start redis-server
 
-```typescript
-// In your backend service
-const response = await fetch('https://your-ai-service.up.railway.app/api/generate-video', {
-  method: 'POST',
-  headers: { 'Content-Type': 'application/json' },
-  body: JSON.stringify({
-    text: 'Roast my pet!',
-    image_url: petImageUrl
-  })
-});
-
-const { job_id } = await response.json();
-// Store job_id, AI service will webhook when done
+# Check Redis logs
+sudo journalctl -u redis-server -n 50
 ```
 
-Backend webhook handler:
-```typescript
-// POST /webhooks/pet-roast-complete
-app.post('/webhooks/pet-roast-complete', async (req, res) => {
-  const { job_id, status, video_url } = req.body;
-  // Update database with video_url
-  // Notify user via push notification
-});
+### Port Already in Use
+
+```bash
+# Find process using port 8000
+lsof -i :8000
+
+# Kill the process
+kill -9 <PID>
 ```
 
-## 📚 Documentation
+### PyTorch Installation Issues
 
-### 🎯 Getting Started
-- [QUICK_START_BACKEND.md](QUICK_START_BACKEND.md) - **5-minute backend integration guide**
-- [RAILWAY_DEPLOYMENT.md](RAILWAY_DEPLOYMENT.md) - Complete Railway deployment guide
+```bash
+# For CUDA 11.8
+pip install torch torchvision --index-url https://download.pytorch.org/whl/cu118
 
-### 🔗 Integration
-- [BACKEND_INTEGRATION.md](BACKEND_INTEGRATION.md) - **Full backend integration (Node.js/GraphQL)**
-- [API_REFERENCE.md](API_REFERENCE.md) - **Complete API documentation**
+# For CPU only
+pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
+```
 
-### 📖 Reference
-- [SETUP.md](SETUP.md) - Detailed setup instructions
-- [COMMANDS.md](COMMANDS.md) - Command reference
+### Railway Deployment Issues
 
-## 🚀 Production Checklist
-
-- [ ] Deploy to Railway
-- [ ] Set all environment variables
-- [ ] Add Redis addon
-- [ ] Configure backend webhook URL
-- [ ] Test pet detection endpoint
-- [ ] Test video generation flow
-- [ ] Verify webhook callbacks work
-- [ ] Set up monitoring/alerts
-
-## 📝 License
-
-Private project for PetSnapChat application.
+1. **Check build logs** in Railway dashboard
+2. **Verify environment variables** are set correctly
+3. **Ensure Redis addon** is connected
+4. **Check application logs** for runtime errors
 
 ---
 
-## 🎊 What's New
+## 🤝 Contributing
 
-**Latest Update:** Perfect Backend Integration (Dec 7, 2025)
+Contributions are welcome! Please follow these steps:
 
-- ✅ **Robust Webhook System** - 3 retry attempts with exponential backoff
-- ✅ **Backend Connectivity Testing** - Test endpoint for verifying backend connection
-- ✅ **Comprehensive Documentation** - 2,400+ lines of guides and examples
-- ✅ **Integration Test Suite** - Automated testing for complete flow
-- ✅ **Setup Scripts** - Interactive configuration wizard
-- ✅ **Complete API Reference** - Full documentation with code examples
+1. Fork the repository
+2. Create a feature branch (`git checkout -b feature/amazing-feature`)
+3. Commit your changes (`git commit -m 'Add amazing feature'`)
+4. Push to the branch (`git push origin feature/amazing-feature`)
+5. Open a Pull Request
 
 ---
 
-**Version:** 2.0.0 - Perfect Backend Integration
-**Last Updated:** December 7, 2025
-**Status:** ✅ Production Ready for Railway Deployment
-# GEN_AI
+## 📄 License
+
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+
+---
+
+## 🙏 Acknowledgments
+
+- [FastAPI](https://fastapi.tiangolo.com/) - Modern web framework
+- [YOLOv5](https://github.com/ultralytics/yolov5) - Pet detection model
+- [Revid.ai](https://revid.ai/) - Video generation API
+- [AI4Bharat](https://ai4bharat.org/) - Translation services
+- [Railway](https://railway.app/) - Deployment platform
+
+---
+
+## 📧 Contact & Support
+
+- **GitHub Issues**: [Create an issue](https://github.com/Chetupatil24/GEN_AI/issues)
+- **GitHub Repository**: https://github.com/Chetupatil24/GEN_AI
+- **Documentation**: Check `/docs` endpoint when server is running
+
+---
+
+## 🎯 Roadmap
+
+- [ ] Add support for multiple pets in single image
+- [ ] Implement video caching for repeated roasts
+- [ ] Add more translation language pairs
+- [ ] Create mobile app integration
+- [ ] Add rate limiting and authentication
+- [ ] Implement batch video generation
+
+---
+
+**Made with ❤️ by the Pet Roast AI Team**
