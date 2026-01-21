@@ -50,7 +50,19 @@ class GenerateVideoRequest(BaseModel):
     """Request body for submitting a new video generation job."""
 
     text: str = Field(..., min_length=1, max_length=5000)
-    image_url: HttpUrl
+    image_url: Optional[str] = None  # Changed from HttpUrl to str to accept data URLs
+    image_data: Optional[str] = Field(None, description="Base64 encoded image data (data:image/...;base64,...)")
+    
+    @field_validator("image_data", mode="before")
+    @classmethod
+    def validate_image_data(cls, v):
+        """Validate that either image_url or image_data is provided."""
+        return v
+    
+    def model_post_init(self, __context):
+        """Ensure either image_url or image_data is provided."""
+        if not self.image_url and not self.image_data:
+            raise ValueError("Either 'image_url' or 'image_data' must be provided")
 
 
 class GenerateVideoResponse(BaseModel):
@@ -93,7 +105,7 @@ class BanubaFiltersResponse(BaseModel):
 
 
 class RevidWebhookEvent(BaseModel):
-    """Incoming webhook payload from Revid.ai."""
+    """Incoming webhook payload from fal.ai (kept name for backwards compatibility)."""
 
     job_id: str
     status: JobStatus

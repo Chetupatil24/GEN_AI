@@ -2,8 +2,10 @@
 
 from functools import lru_cache
 from typing import List, Optional
+import json
+import os
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -23,12 +25,11 @@ class Settings(BaseSettings):
     ai4bharat_translate_path: str = "/translate"
     ai4bharat_api_key: Optional[str] = None
 
-    revid_api_key: str = Field(default=...)
-    revid_base_url: str = "https://api.revid.ai/v1"
-    revid_create_job_path: str = "/videos"
-    revid_status_path: str = "/videos/{job_id}"
-    revid_result_path: str = "/videos/{job_id}/result"
-    revid_webhook_secret: Optional[str] = None
+    # fal.ai API configuration for video generation
+    fal_api_key: str = Field(default=...)
+    fal_base_url: str = "https://queue.fal.run"  # fal.ai queue endpoint
+    fal_model_id: str = "fal-ai/minimax-video"
+    fal_webhook_secret: Optional[str] = None
 
     banuba_filters: List[BanubaFilterConfig] = Field(
         default_factory=lambda: [
@@ -72,10 +73,31 @@ class Settings(BaseSettings):
         env_file_encoding="utf-8",
         case_sensitive=False,
     )
+    
+    @model_validator(mode="before")
+    @classmethod
+    def remove_invalid_cors_origins(cls, data):
+        """Remove invalid CORS_ORIGINS from environment before parsing."""
+        if isinstance(data, dict) and "CORS_ORIGINS" in data:
+            cors_val = data["CORS_ORIGINS"]
+            # Remove if it's an invalid format
+            if isinstance(cors_val, str) and cors_val in ["[*]", "[*", "*]", "*"]:
+                data.pop("CORS_ORIGINS", None)
+        # Also remove from os.environ if it exists and is invalid
+        if "CORS_ORIGINS" in os.environ:
+            cors_val = os.environ["CORS_ORIGINS"]
+            if cors_val in ["[*]", "[*", "*]", "*"]:
+                os.environ.pop("CORS_ORIGINS", None)
+        return data
 
 
 @lru_cache
 def get_settings() -> Settings:
     """Return cached settings instance for dependency injection."""
-
+    # Clear cache if environment variables changed (for development)
+    # In production, this cache improves performance
     return Settings()
+
+def clear_settings_cache():
+    """Clear the settings cache (useful for testing/reloading)."""
+    get_settings.cache_clear()

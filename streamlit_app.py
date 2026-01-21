@@ -106,10 +106,17 @@ def upload_image_to_url(uploaded_file):
 
 def generate_video(text, image_url, filter_id=None):
     """Generate a pet roast video."""
-    payload = {
-        "text": text,
-        "image_url": image_url
-    }
+    # Use image_data for base64 data URLs to avoid URL length limits
+    if image_url and image_url.startswith("data:image/"):
+        payload = {
+            "text": text,
+            "image_data": image_url  # Send base64 data directly
+        }
+    else:
+        payload = {
+            "text": text,
+            "image_url": image_url
+        }
     if filter_id:
         payload["filter_id"] = filter_id
 
@@ -167,7 +174,7 @@ def main():
         else:
             st.markdown('<div class="error-box">❌ API Server: Offline<br/>Please start the server!</div>', unsafe_allow_html=True)
             st.code("uvicorn app.main:app --reload --host 0.0.0.0 --port 8000", language="bash")
-            return
+            st.warning("⚠️ Some features may not work without the API server running.")
 
         st.markdown("---")
         st.header("📚 Quick Links")
@@ -349,5 +356,10 @@ def main():
             st.info("No filters configured")
 
 
-if __name__ == "__main__":
+# Streamlit automatically runs the script, but we can call main() explicitly
+# This ensures the app renders even if there are import issues
+try:
     main()
+except Exception as e:
+    st.error(f"Error loading app: {e}")
+    st.exception(e)

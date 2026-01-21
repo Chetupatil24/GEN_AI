@@ -25,7 +25,7 @@
 
 - 🤖 **AI-Powered Pet Detection** - Uses YOLOv5 to detect and identify pets in images
 - 🌐 **Multi-Language Support** - Translates roasts using AI4Bharat/Sarvam APIs
-- 🎬 **Video Generation** - Creates engaging roast videos via Revid.ai
+- 🎬 **Video Generation** - Creates engaging roast videos via fal.ai
 - 📦 **Job Management** - Redis-backed persistent job storage with TTL
 - 🔔 **Webhook System** - Notifies backend when video processing completes
 - ⚡ **Async Processing** - Non-blocking video generation with status tracking
@@ -40,7 +40,7 @@
 | **Backend** | FastAPI, Uvicorn, Python 3.10+ |
 | **AI/ML** | PyTorch, YOLOv5, Torchvision, OpenCV |
 | **Database** | Redis (job storage & caching) |
-| **APIs** | Revid.ai, AI4Bharat, Sarvam |
+| **APIs** | fal.ai, AI4Bharat, Sarvam |
 | **Deployment** | Railway, Docker |
 | **Testing** | Pytest, Pytest-asyncio |
 
@@ -54,7 +54,7 @@
 - **Redis**: Running instance (localhost:6379)
 - **Git**: Version control
 - **API Keys**: 
-  - Revid.ai API key
+  - fal.ai API key (required)
   - AI4Bharat API key (optional)
   - Sarvam API key (optional)
 
@@ -129,14 +129,19 @@ cp .env.example .env
 Edit `.env` with your configuration:
 
 ```env
-# API Configuration
-REVID_API_KEY=your_revid_api_key_here
+# AI4Bharat Translation Configuration
+AI4BHARAT_BASE_URL=http://localhost:5000
+AI4BHARAT_TRANSLATE_PATH=/translate
 AI4BHARAT_API_KEY=your_ai4bharat_key_here
-SARVAM_API_KEY=your_sarvam_key_here
+
+# fal.ai API Configuration (Required for video generation)
+FAL_API_KEY=your_fal_api_key_here
+FAL_BASE_URL=https://api.fal.ai
+FAL_MODEL_ID=fal-ai/minimax-video/image-to-video
 
 # Redis Configuration (Local)
-REDIS_URL=redis://localhost:6379
-USE_REDIS=true
+REDIS_URL=redis://localhost:6379/0
+USE_REDIS=false
 REDIS_JOB_TTL_SECONDS=86400
 
 # Server Configuration
@@ -217,10 +222,13 @@ curl http://localhost:8000/healthz
    In Railway project settings, add these variables:
 
    ```env
-   REVID_API_KEY=your_revid_api_key
+   FAL_API_KEY=your_fal_api_key
+   FAL_BASE_URL=https://api.fal.ai
+   FAL_MODEL_ID=fal-ai/minimax-video/image-to-video
+   AI4BHARAT_BASE_URL=http://localhost:5000
+   AI4BHARAT_TRANSLATE_PATH=/translate
    AI4BHARAT_API_KEY=your_ai4bharat_key
-   SARVAM_API_KEY=your_sarvam_key
-   USE_REDIS=true
+   USE_REDIS=false
    REDIS_JOB_TTL_SECONDS=86400
    BACKEND_WEBHOOK_URL=https://your-backend.railway.app/webhooks/video-complete
    CORS_ORIGINS=["https://your-backend.railway.app"]
@@ -297,7 +305,7 @@ GET /api/video-status/{job_id}
 {
   "job_id": "abc123def456",
   "status": "completed",
-  "video_url": "https://revid.ai/video/xyz.mp4",
+  "video_url": "https://fal.ai/video/xyz.mp4",
   "created_at": "2026-01-10T10:30:00Z"
 }
 ```
@@ -347,7 +355,11 @@ Content-Type: application/json
 
 | Variable | Description | Required | Default |
 |----------|-------------|----------|---------|
-| `REVID_API_KEY` | Revid.ai API key for video generation | ✅ Yes | - |
+| `FAL_API_KEY` | fal.ai API key for video generation | ✅ Yes | - |
+| `FAL_BASE_URL` | fal.ai API base URL | No | `https://api.fal.ai` |
+| `FAL_MODEL_ID` | fal.ai model identifier | No | `fal-ai/minimax-video/image-to-video` |
+| `AI4BHARAT_BASE_URL` | AI4Bharat translation server URL | No | `http://localhost:5000` |
+| `AI4BHARAT_TRANSLATE_PATH` | AI4Bharat translation endpoint path | No | `/translate` |
 | `AI4BHARAT_API_KEY` | AI4Bharat translation API key | ⚠️ Optional | - |
 | `SARVAM_API_KEY` | Sarvam translation API key | ⚠️ Optional | - |
 | `REDIS_URL` | Redis connection URL | ✅ Yes | `redis://localhost:6379` |
@@ -379,7 +391,8 @@ pet_roasts/
 │   │
 │   ├── clients/
 │   │   ├── ai4bharat.py           # AI4Bharat translation client
-│   │   ├── revid.py               # Revid video generation client
+│   │   ├── fal.py                 # fal.ai video generation client
+│   │   ├── revid.py               # Revid video generation client (deprecated)
 │   │   └── sarvam.py              # Sarvam translation client
 │   │
 │   ├── core/
@@ -513,7 +526,7 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 - [FastAPI](https://fastapi.tiangolo.com/) - Modern web framework
 - [YOLOv5](https://github.com/ultralytics/yolov5) - Pet detection model
-- [Revid.ai](https://revid.ai/) - Video generation API
+- [fal.ai](https://fal.ai/) - Video generation API
 - [AI4Bharat](https://ai4bharat.org/) - Translation services
 - [Railway](https://railway.app/) - Deployment platform
 

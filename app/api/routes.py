@@ -8,15 +8,16 @@ from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 import httpx
 
 from app.clients.ai4bharat import AI4BharatClient
-from app.clients.revid import RevidClient
+from app.clients.fal import FalClient
 from app.core.config import Settings
-from app.core.exceptions import AI4BharatAPIError, RevidAPIError
+from app.core.exceptions import AI4BharatAPIError, FalAPIError
 from app.core.webhook import extract_signature_from_header, verify_webhook_signature
 from app.dependencies import (
     get_ai4bharat_client,
     get_job_store,
-    get_revid_client,
+    get_fal_client,
     get_settings_dependency,
+    get_video_storage,
 )
 from app.schemas import (
     BanubaFilter,
@@ -31,6 +32,7 @@ from app.schemas import (
 )
 from app.services.job_store import JobRecord, JobStatus, JobStore
 from app.services.pet_detection import get_pet_detector
+from app.services.video_storage import VideoStorageService
 
 router = APIRouter(prefix="/api")
 _logger = logging.getLogger(__name__)
@@ -113,25 +115,44 @@ async def translate_text(
 async def generate_video(
     payload: GenerateVideoRequest,
     ai4bharat_client: AI4BharatClient = Depends(get_ai4bharat_client),
-    revid_client: RevidClient = Depends(get_revid_client),
+    fal_client: FalClient = Depends(get_fal_client),
     job_store: JobStore = Depends(get_job_store),
 ) -> GenerateVideoResponse:
-    """Request a Revid.ai video after preparing the roast script with AI4Bharat.
+    """Request a fal.ai video after preparing the roast script with AI4Bharat.
 
     This endpoint validates that the image contains pets before generating video.
     If no pets are detected, it returns a 400 error asking users to upload pet images/videos.
     """
 
-    # Step 1: Validate pet presence in the image
+    # Step 1: Determine image source and validate pet presence
     pet_detector = get_pet_detector()
-    async with httpx.AsyncClient(timeout=httpx.Timeout(10.0)) as client:
-        has_pets, detected_pets, _ = await pet_detector.detect_pets_in_image_url(
-            str(payload.image_url),
-            client
+    
+    # Use image_data if provided, otherwise use image_url
+    if payload.image_data:
+        # Handle base64 data URL
+        image_source = payload.image_data
+        async with httpx.AsyncClient(timeout=httpx.Timeout(10.0)) as client:
+            has_pets, detected_pets, _ = await pet_detector.detect_pets_in_image_url(
+                image_source,
+                client
+            )
+        final_image_url = image_source  # Use data URL for fal.ai
+    elif payload.image_url:
+        image_source = str(payload.image_url)
+        async with httpx.AsyncClient(timeout=httpx.Timeout(10.0)) as client:
+            has_pets, detected_pets, _ = await pet_detector.detect_pets_in_image_url(
+                image_source,
+                client
+            )
+        final_image_url = image_source
+    else:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Either 'image_url' or 'image_data' must be provided"
         )
 
     if not has_pets:
-        _logger.warning(f"No pets detected in image: {payload.image_url}")
+        _logger.warning(f"No pets detected in image")
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail={
@@ -156,27 +177,27 @@ async def generate_video(
         _logger.exception("AI4Bharat preprocessing failed for video generation")
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
 
-    # Step 3: Create video generation job with Revid
+    # Step 3: Create video generation job with fal.ai
     try:
-        revid_response = await revid_client.create_video_job(
+        fal_response = await fal_client.create_video_job(
             text=clean_text,
-            image_url=str(payload.image_url),
+            image_url=final_image_url,
             language="en",
         )
-    except RevidAPIError as exc:
-        _logger.exception("Failed to create Revid job")
+    except FalAPIError as exc:
+        _logger.exception("Failed to create fal.ai job")
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
 
-    job_id = revid_response["job_id"]
-    status_value = _normalise_status(revid_response.get("status", "queued"))
-    detail = revid_response.get("detail")
+    job_id = fal_response["job_id"]
+    status_value = _normalise_status(fal_response.get("status", "queued"))
+    detail = fal_response.get("detail")
 
     # Step 4: Store job with detected pets metadata
     record = JobRecord(
         job_id=job_id,
         status=status_value,
         text=clean_text,
-        image_url=str(payload.image_url),
+        image_url=final_image_url,
         language="en",
         detail=detail,
     )
@@ -193,10 +214,11 @@ async def video_completion_webhook(
     payload: dict,
     job_store: JobStore = Depends(get_job_store),
     settings: Settings = Depends(get_settings_dependency),
+    video_storage: VideoStorageService = Depends(get_video_storage),
 ) -> dict:
-    """Webhook endpoint for Revid.ai to notify when video is complete.
+    """Webhook endpoint for fal.ai to notify when video is complete.
 
-    This endpoint will be called by Revid when video generation completes.
+    This endpoint will be called by fal.ai when video generation completes.
     It updates the job status and notifies the backend via webhook with retry logic.
 
     Expected payload:
@@ -231,6 +253,19 @@ async def video_completion_webhook(
             if video_url:
                 stored_record.video_url = video_url
                 _logger.info(f"📹 Video URL for job {job_id}: {video_url}")
+                
+                # Download and save video to storage
+                try:
+                    local_path = await video_storage.download_and_save_video(
+                        video_url=video_url,
+                        job_id=job_id,
+                    )
+                    if local_path:
+                        _logger.info(f"💾 Video saved to: {local_path}")
+                    else:
+                        _logger.warning(f"⚠️  Failed to save video for job {job_id}")
+                except Exception as e:
+                    _logger.error(f"❌ Error saving video for job {job_id}: {e}")
             if error:
                 stored_record.detail = error
                 _logger.error(f"❌ Job {job_id} failed: {error}")
@@ -336,14 +371,14 @@ async def video_completion_webhook(
 @router.get("/video-status/{job_id}", response_model=VideoStatusResponse)
 async def get_video_status(
     job_id: str,
-    revid_client: RevidClient = Depends(get_revid_client),
+    fal_client: FalClient = Depends(get_fal_client),
     job_store: JobStore = Depends(get_job_store),
 ) -> VideoStatusResponse:
-    """Poll Revid.ai for the latest job status."""
+    """Poll fal.ai for the latest job status."""
 
     stored_record = await job_store.get(job_id)
     try:
-        remote_status = await revid_client.get_job_status(job_id)
+        remote_status = await fal_client.get_job_status(job_id)
         status_value = _normalise_status(remote_status.get("status", "processing"))
         detail = remote_status.get("detail")
         video_url = remote_status.get("video_url")
@@ -365,8 +400,8 @@ async def get_video_status(
                 detail=detail,
                 video_url=video_url,
             )
-    except RevidAPIError as exc:
-        _logger.exception("Revid status retrieval failed")
+    except FalAPIError as exc:
+        _logger.exception("fal.ai status retrieval failed")
         if stored_record is None:
             raise HTTPException(
                 status_code=status.HTTP_502_BAD_GATEWAY,
@@ -387,10 +422,11 @@ async def get_video_status(
 @router.get("/video-result/{job_id}", response_model=VideoResultResponse)
 async def get_video_result(
     job_id: str,
-    revid_client: RevidClient = Depends(get_revid_client),
+    fal_client: FalClient = Depends(get_fal_client),
     job_store: JobStore = Depends(get_job_store),
+    video_storage: VideoStorageService = Depends(get_video_storage),
 ) -> VideoResultResponse:
-    """Retrieve final video URL once Revid.ai completes the job."""
+    """Retrieve final video URL once fal.ai completes the job."""
 
     record = await job_store.get(job_id)
     if record is None:
@@ -398,7 +434,7 @@ async def get_video_result(
 
     if record.status != JobStatus.COMPLETED or not record.video_url:
         try:
-            status_payload = await revid_client.get_job_status(job_id)
+            status_payload = await fal_client.get_job_status(job_id)
             status_value = _normalise_status(status_payload.get("status", record.status.value))
             detail = status_payload.get("detail")
             video_url = status_payload.get("video_url")
@@ -408,8 +444,8 @@ async def get_video_result(
                 detail=detail,
                 video_url=video_url,
             ) or record
-        except RevidAPIError as exc:
-            _logger.exception("Revid status fetch during result retrieval failed")
+        except FalAPIError as exc:
+            _logger.exception("fal.ai status fetch during result retrieval failed")
             raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
 
         if record.status != JobStatus.COMPLETED:
@@ -420,9 +456,9 @@ async def get_video_result(
 
         if not record.video_url:
             try:
-                result_payload = await revid_client.get_job_result(job_id)
-            except RevidAPIError as exc:
-                _logger.exception("Revid result fetch failed")
+                result_payload = await fal_client.get_job_result(job_id)
+            except FalAPIError as exc:
+                _logger.exception("fal.ai result fetch failed")
                 raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
             if not result_payload or "video_url" not in result_payload:
                 raise HTTPException(
@@ -433,6 +469,30 @@ async def get_video_result(
                 job_id,
                 video_url=result_payload["video_url"],
             ) or record
+            
+            # Download and save video if we just got the URL
+            if result_payload.get("video_url"):
+                try:
+                    local_path = await video_storage.download_and_save_video(
+                        video_url=result_payload["video_url"],
+                        job_id=job_id,
+                    )
+                    if local_path:
+                        _logger.info(f"💾 Video saved to: {local_path}")
+                except Exception as e:
+                    _logger.error(f"❌ Error saving video for job {job_id}: {e}")
+
+    # Also try to save if video_url exists but wasn't saved yet
+    if record.video_url and not video_storage.get_video_path(job_id):
+        try:
+            local_path = await video_storage.download_and_save_video(
+                video_url=record.video_url,
+                job_id=job_id,
+            )
+            if local_path:
+                _logger.info(f"💾 Video saved to: {local_path}")
+        except Exception as e:
+            _logger.error(f"❌ Error saving video for job {job_id}: {e}")
 
     return VideoResultResponse(
         job_id=job_id,
@@ -533,17 +593,17 @@ async def list_banuba_filters(
     return BanubaFiltersResponse(filters=filters)
 
 
-@router.post("/revid-webhook", status_code=status.HTTP_204_NO_CONTENT)
-async def handle_revid_webhook(
+@router.post("/fal-webhook", status_code=status.HTTP_204_NO_CONTENT)
+async def handle_fal_webhook(
     request: Request,
     event: RevidWebhookEvent,
     job_store: JobStore = Depends(get_job_store),
     settings: Settings = Depends(get_settings_dependency),
 ) -> Response:
-    """Process webhook callbacks from Revid.ai and update job state."""
+    """Process webhook callbacks from fal.ai and update job state."""
 
-    if settings.revid_webhook_secret:
-        signature_header = request.headers.get("X-Revid-Signature")
+    if settings.fal_webhook_secret:
+        signature_header = request.headers.get("X-Fal-Signature") or request.headers.get("X-Webhook-Signature")
         signature = extract_signature_from_header(signature_header)
         if not signature:
             raise HTTPException(
@@ -554,7 +614,7 @@ async def handle_revid_webhook(
         if not verify_webhook_signature(
             payload=body,
             signature=signature,
-            secret=settings.revid_webhook_secret,
+            secret=settings.fal_webhook_secret,
         ):
             _logger.warning("Webhook signature verification failed for job %s", event.job_id)
             raise HTTPException(

@@ -1,4 +1,4 @@
-"""Redis-backed persistent job storage for Revid.ai workflows."""
+"""Redis-backed persistent job storage for video generation workflows."""
 
 from __future__ import annotations
 

@@ -10,4 +10,8 @@ class AI4BharatAPIError(ExternalServiceError):
 
 
 class RevidAPIError(ExternalServiceError):
-    """Wraps errors from the Revid.ai video generation API."""
+    """Wraps errors from the Revid.ai video generation API (deprecated)."""
+
+
+class FalAPIError(ExternalServiceError):
+    """Wraps errors from the fal.ai video generation API."""

@@ -3,9 +3,10 @@
 from fastapi import Request
 
 from app.clients.ai4bharat import AI4BharatClient
-from app.clients.revid import RevidClient
+from app.clients.fal import FalClient
 from app.core.config import Settings, get_settings
 from app.services.job_store import JobStore
+from app.services.video_storage import VideoStorageService
 
 
 def get_settings_dependency() -> Settings:
@@ -26,7 +27,13 @@ def get_ai4bharat_client(request: Request) -> AI4BharatClient:
     return request.app.state.ai4bharat_client
 
 
-def get_revid_client(request: Request) -> RevidClient:
-    """Fetch the Revid client from the application state."""
+def get_fal_client(request: Request) -> FalClient:
+    """Fetch the fal.ai client from the application state."""
 
-    return request.app.state.revid_client
+    return request.app.state.fal_client
+
+
+def get_video_storage(request: Request) -> VideoStorageService:
+    """Fetch the video storage service from the application state."""
+
+    return request.app.state.video_storage

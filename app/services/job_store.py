@@ -1,4 +1,4 @@
-"""In-memory job tracking utilities for Revid.ai workflows."""
+"""In-memory job tracking utilities for video generation workflows."""
 
 from __future__ import annotations
 

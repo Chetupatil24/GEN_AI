@@ -23,24 +23,29 @@ wheels/
 .installed.cfg
 *.egg
 
-# Testing
-.pytest_cache/
-.coverage
-htmlcov/
-.tox/
-
-# Jupyter
-.ipynb_checkpoints
-
-# Environment
+# Environment variables
 .env
 .env.local
+.env.*.local
 
-# Logs
-*.log
-
-# Model weights (if cached)
-yolov5*.pt
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
 
 # OS
 .DS_Store
+Thumbs.db
+
+# Project specific
+storage/
+*.pt
+*.pth
+*.log
+*.bak
+
+# Keep these
+!.env.example
+!.env.railway
