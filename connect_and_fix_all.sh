@@ -1,7 +1,7 @@
 #!/bin/bash
 # Complete Railway Connection and Fix All Script
 
-export RAILWAY_TOKEN="d2438d39-dad1-4761-a423-bf02d3bdd002"
+export RAILWAY_TOKEN="rw_d2438d39-dad1-4761-a423-bf02d3bdd002"
 PROJECT_ID="d3e9f8f4-cdca-4825-9ec4-f7fa9844d266"
 
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
@@ -16,14 +16,12 @@ if railway whoami &> /dev/null 2>&1; then
     railway whoami
 else
     echo "❌ Authentication failed"
-    echo "⚠️  Token might be invalid or need full token"
-    echo "   Check: https://railway.app/account/tokens"
     exit 1
 fi
 
 echo ""
 echo "Step 2: Linking to project..."
-railway link --project "$PROJECT_ID" 2>/dev/null && echo "✅ Linked to project" || echo "⚠️  Link may have failed or already linked"
+railway link --project "$PROJECT_ID" 2>/dev/null && echo "✅ Linked to project" || echo "⚠️  Already linked or link failed"
 
 echo ""
 echo "Step 3: Setting environment variables..."
