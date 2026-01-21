@@ -25,6 +25,10 @@ class Settings(BaseSettings):
     ai4bharat_translate_path: str = "/translate"
     ai4bharat_api_key: Optional[str] = None
 
+    # pets-backend GraphQL server configuration
+    pets_backend_url: str = "http://localhost:4000"  # GraphQL server URL
+    pets_backend_enabled: bool = False  # Enable/disable pets-backend integration
+
     # fal.ai API configuration for video generation
     fal_api_key: str = Field(default=...)
     fal_base_url: str = "https://queue.fal.run"  # fal.ai queue endpoint

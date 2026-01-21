@@ -47,7 +47,11 @@ class PetsBackendClient:
         return headers
 
     async def verify_token(self, token: str) -> Dict[str, Any]:
-        """Verify JWT token with pets-backend.
+        """Verify JWT token with pets-backend using Firebase Admin.
+
+        Note: pets-backend uses Firebase Admin for token verification.
+        This method attempts to verify via GraphQL, but if that's not available,
+        you may need to verify the token directly using Firebase Admin SDK.
 
         Args:
             token: JWT token to verify
@@ -58,31 +62,31 @@ class PetsBackendClient:
         Raises:
             PetsBackendError: If verification fails
         """
+        # Since pets-backend uses Firebase Admin, we can verify tokens
+        # by checking with the backend's auth context
+        # For now, we'll use a simple GraphQL query to get user info
         query = """
-        query VerifyToken($token: String!) {
-            verifyToken(token: $token) {
-                userId
+        query GetUser {
+            me {
+                id
                 email
-                valid
             }
         }
         """
-        
-        variables = {"token": token}
         
         try:
             if not self._http_client:
                 async with httpx.AsyncClient(timeout=self._timeout) as client:
                     response = await client.post(
                         self._graphql_url,
-                        json={"query": query, "variables": variables},
-                        headers=self._headers(),
+                        json={"query": query},
+                        headers=self._headers(token=token),
                     )
             else:
                 response = await self._http_client.post(
                     self._graphql_url,
-                    json={"query": query, "variables": variables},
-                    headers=self._headers(),
+                    json={"query": query},
+                    headers=self._headers(token=token),
                 )
             
             response.raise_for_status()
@@ -91,9 +95,15 @@ class PetsBackendClient:
             if "errors" in data:
                 raise PetsBackendError(f"GraphQL errors: {data['errors']}")
             
-            return data.get("data", {}).get("verifyToken", {})
+            user_data = data.get("data", {}).get("me", {})
+            if not user_data:
+                raise PetsBackendError("Token verification failed: No user data")
+            
+            return user_data
             
         except httpx.HTTPStatusError as exc:
+            if exc.response.status_code == 401:
+                raise PetsBackendError("Token verification failed: Unauthorized")
             raise PetsBackendError(
                 f"pets-backend verification failed: HTTP {exc.response.status_code}"
             ) from exc

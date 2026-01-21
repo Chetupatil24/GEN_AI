@@ -15,3 +15,7 @@ class RevidAPIError(ExternalServiceError):
 
 class FalAPIError(ExternalServiceError):
     """Wraps errors from the fal.ai video generation API."""
+
+
+class PetsBackendError(ExternalServiceError):
+    """Wraps errors from the pets-backend GraphQL API."""
