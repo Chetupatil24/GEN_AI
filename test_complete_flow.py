@@ -39,18 +39,18 @@ async def test_complete_flow():
     
     # Step 1: Health check
     print("1️⃣ Checking server health...")
-    async with httpx.AsyncClient(timeout=30.0) as client:
-        try:
-            response = await client.get(f"{base_url}/healthz")
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as health_client:
+            response = await health_client.get(f"{base_url}/healthz")
             if response.status_code == 200:
                 print("   ✅ Server is running")
             else:
                 print(f"   ❌ Server health check failed: {response.status_code}")
                 return False
-        except Exception as e:
-            print(f"   ❌ Cannot connect to server: {e}")
-            print("   💡 Make sure uvicorn is running: uvicorn app.main:app --host 0.0.0.0 --port 8000")
-            return False
+    except Exception as e:
+        print(f"   ❌ Cannot connect to server: {e}")
+        print("   💡 Make sure uvicorn is running: uvicorn app.main:app --host 0.0.0.0 --port 8000")
+        return False
     
     # Step 2: Create test image
     print("")
