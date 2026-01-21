@@ -1,7 +1,7 @@
 # Multi-stage build to reduce final image size
 FROM python:3.10-slim as builder
 
-# Install build dependencies only
+# Install build dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     && rm -rf /var/lib/apt/lists/*
@@ -34,7 +34,7 @@ WORKDIR /app
 # Copy only essential application code
 COPY app/ ./app/
 
-# Copy IndicTrans2 (exclude large files via .dockerignore)
+# Copy IndicTrans2 (only essential files, exclude large models if possible)
 COPY IndicTrans2/ ./IndicTrans2/
 
 # Create necessary directories
@@ -43,7 +43,6 @@ RUN mkdir -p logs storage/videos && \
 
 # Don't download YOLO model at build time - download at runtime
 # This saves ~200MB in the image
-# The model will be downloaded automatically on first use
 
 # Expose port
 EXPOSE 8000
