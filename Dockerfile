@@ -22,10 +22,10 @@ RUN python -c "import torch; torch.hub.load('ultralytics/yolov5', 'yolov5s', pre
 
 # Copy application code
 COPY app/ ./app/
-COPY examples/ ./examples/
+COPY IndicTrans2/ ./IndicTrans2/
 
-# Create logs directory
-RUN mkdir -p logs
+# Create necessary directories
+RUN mkdir -p logs storage/videos
 
 # Railway automatically sets PORT, so we use environment variable
 EXPOSE 8000
