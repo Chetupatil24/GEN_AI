@@ -54,6 +54,9 @@ class Settings(BaseSettings):
     request_timeout_seconds: float = 30.0
     max_retries: int = 3
     retry_backoff_factor: float = 1.5
+    # Video storage configuration
+    video_storage_path: str = "storage/videos"  # Local directory for storing videos
+
 
     # Redis configuration for persistent job storage
     redis_url: str = "redis://localhost:6379/0"
