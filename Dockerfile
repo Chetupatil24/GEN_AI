@@ -17,15 +17,17 @@ COPY requirements.txt .
 # Install Python dependencies
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Download YOLO model at build time (optional - can also lazy load)
-RUN python -c "import torch; torch.hub.load('ultralytics/yolov5', 'yolov5s', pretrained=True)"
+# Download YOLO model at build time (with error handling)
+# If this fails, the model will be downloaded at runtime
+RUN python -c "import torch; torch.hub.load('ultralytics/yolov5', 'yolov5s', pretrained=True)" || echo "YOLO model download failed, will download at runtime"
 
 # Copy application code
 COPY app/ ./app/
 COPY IndicTrans2/ ./IndicTrans2/
 
-# Create necessary directories
-RUN mkdir -p logs storage/videos
+# Create necessary directories with proper permissions
+RUN mkdir -p logs storage/videos && \
+    chmod -R 755 storage logs
 
 # Railway automatically sets PORT, so we use environment variable
 EXPOSE 8000

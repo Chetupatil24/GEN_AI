@@ -21,8 +21,15 @@ class VideoStorageService:
             storage_path: Base directory path for storing videos
         """
         self.storage_path = Path(storage_path)
-        self.storage_path.mkdir(parents=True, exist_ok=True)
-        _logger.info(f"📁 Video storage initialized at: {self.storage_path.absolute()}")
+        try:
+            self.storage_path.mkdir(parents=True, exist_ok=True)
+            # Ensure directory is writable
+            os.chmod(self.storage_path, 0o755)
+            _logger.info(f"📁 Video storage initialized at: {self.storage_path.absolute()}")
+        except Exception as e:
+            _logger.warning(f"⚠️  Failed to create storage directory: {e}. Using /tmp as fallback.")
+            self.storage_path = Path("/tmp/videos")
+            self.storage_path.mkdir(parents=True, exist_ok=True)
 
     async def download_and_save_video(
         self,
