@@ -47,22 +47,49 @@ class TranslateTextResponse(BaseModel):
 
 
 class GenerateVideoRequest(BaseModel):
-    """Request body for submitting a new video generation job."""
+    """Request body for submitting a new video generation job.
+    
+    Supports two modes:
+    1. Text + Image: Provide text and image_url/image_data
+    2. Video Input: Provide video_data or video_url (audio will be extracted and converted to text)
+    """
 
-    text: str = Field(..., min_length=1, max_length=5000)
+    # Text input (optional if video is provided)
+    text: Optional[str] = Field(None, min_length=1, max_length=5000)
+    
+    # Image input (optional if video is provided)
     image_url: Optional[str] = None  # Changed from HttpUrl to str to accept data URLs
     image_data: Optional[str] = Field(None, description="Base64 encoded image data (data:image/...;base64,...)")
     
-    @field_validator("image_data", mode="before")
+    # Video input (new - for audio extraction and STT)
+    video_url: Optional[str] = Field(None, description="URL to video file")
+    video_data: Optional[str] = Field(None, description="Base64 encoded video data (data:video/...;base64,...)")
+    
+    @field_validator("image_data", "video_data", mode="before")
     @classmethod
-    def validate_image_data(cls, v):
-        """Validate that either image_url or image_data is provided."""
+    def validate_data(cls, v):
+        """Validate data fields."""
         return v
     
     def model_post_init(self, __context):
-        """Ensure either image_url or image_data is provided."""
-        if not self.image_url and not self.image_data:
-            raise ValueError("Either 'image_url' or 'image_data' must be provided")
+        """Ensure either (text + image) or video is provided."""
+        has_text = bool(self.text)
+        has_image = bool(self.image_url or self.image_data)
+        has_video = bool(self.video_url or self.video_data)
+        
+        # Mode 1: Text + Image
+        if has_text and has_image:
+            return  # Valid
+        
+        # Mode 2: Video input (will extract audio and convert to text)
+        if has_video:
+            return  # Valid
+        
+        # Invalid: missing required inputs
+        raise ValueError(
+            "Either provide (text + image_url/image_data) OR (video_url/video_data). "
+            "For video input, audio will be extracted and converted to text automatically."
+        )
 
 
 class GenerateVideoResponse(BaseModel):

@@ -2,7 +2,7 @@
 
 from typing import Optional
 
-from fastapi import Request
+from fastapi import Request, Depends
 
 from app.clients.ai4bharat import AI4BharatClient
 from app.clients.fal import FalClient
@@ -10,6 +10,9 @@ from app.clients.pets_backend import PetsBackendClient
 from app.core.config import Settings, get_settings
 from app.services.job_store import JobStore
 from app.services.video_storage import VideoStorageService
+from app.services.audio_extraction import AudioExtractionService, get_audio_extraction_service
+from app.services.speech_to_text import SpeechToTextService, get_speech_to_text_service
+from app.services.content_filter import ContentFilterService, get_content_filter_service
 
 
 def get_settings_dependency() -> Settings:
@@ -48,3 +51,21 @@ def get_pets_backend_client() -> Optional[PetsBackendClient]:
     if not settings.pets_backend_enabled:
         return None
     return PetsBackendClient(base_url=settings.pets_backend_url)
+
+
+def get_audio_extraction_service_dependency(request: Request) -> Optional[AudioExtractionService]:
+    """Get audio extraction service from app state."""
+    return getattr(request.app.state, "audio_extraction_service", None)
+
+
+def get_speech_to_text_service_dependency(request: Request) -> Optional[SpeechToTextService]:
+    """Get speech-to-text service from app state."""
+    return getattr(request.app.state, "stt_service", None)
+
+
+def get_content_filter_service_dependency(
+    request: Request,
+    ai4bharat_client: AI4BharatClient = Depends(get_ai4bharat_client)
+) -> Optional[ContentFilterService]:
+    """Get content filter service."""
+    return get_content_filter_service(ai4bharat_client)

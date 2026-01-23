@@ -18,7 +18,14 @@ from app.dependencies import (
     get_fal_client,
     get_settings_dependency,
     get_video_storage,
+    get_audio_extraction_service_dependency,
+    get_speech_to_text_service_dependency,
+    get_content_filter_service_dependency,
 )
+from app.services.audio_extraction import AudioExtractionService, AudioExtractionError
+from app.services.speech_to_text import SpeechToTextService, SpeechToTextError
+from app.services.content_filter import ContentFilterService
+from typing import Optional
 from app.schemas import (
     BanubaFilter,
     BanubaFiltersResponse,
@@ -114,75 +121,257 @@ async def translate_text(
 )
 async def generate_video(
     payload: GenerateVideoRequest,
+    request: Request,
     ai4bharat_client: AI4BharatClient = Depends(get_ai4bharat_client),
     fal_client: FalClient = Depends(get_fal_client),
     job_store: JobStore = Depends(get_job_store),
+    audio_service: Optional[AudioExtractionService] = Depends(get_audio_extraction_service_dependency),
+    stt_service: Optional[SpeechToTextService] = Depends(get_speech_to_text_service_dependency),
+    content_filter: Optional[ContentFilterService] = Depends(get_content_filter_service_dependency),
 ) -> GenerateVideoResponse:
-    """Request a fal.ai video after preparing the roast script with AI4Bharat.
+    """Request a fal.ai video after preparing the roast script.
 
-    This endpoint validates that the image contains pets before generating video.
-    If no pets are detected, it returns a 400 error asking users to upload pet images/videos.
-    """
-
-    # Step 1: Determine image source and validate pet presence
-    pet_detector = get_pet_detector()
+    Supports two modes:
+    1. Text + Image: Provide text and image_url/image_data
+    2. Video Input: Provide video_data/video_url (audio extracted, converted to text, filtered)
     
-    # Use image_data if provided, otherwise use image_url
-    if payload.image_data:
-        # Handle base64 data URL
-        image_source = payload.image_data
-        async with httpx.AsyncClient(timeout=httpx.Timeout(10.0)) as client:
-            has_pets, detected_pets, _ = await pet_detector.detect_pets_in_image_url(
-                image_source,
-                client
+    This endpoint validates that the image/video contains pets before generating video.
+    """
+    import base64
+    import tempfile
+    import os
+    from PIL import Image
+    import io
+    import numpy as np
+    
+    pet_detector = get_pet_detector()
+    final_image_url: str = None
+    clean_text: str = None
+    detected_language: str = "en"
+    
+    # MODE 1: Video Input (extract audio, convert to text, filter)
+    if payload.video_data or payload.video_url:
+        _logger.info("📹 Processing video input mode")
+        
+        if not audio_service:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Audio extraction service not available. Install moviepy."
             )
-        final_image_url = image_source  # Use data URL for fal.ai
-    elif payload.image_url:
-        image_source = str(payload.image_url)
-        async with httpx.AsyncClient(timeout=httpx.Timeout(10.0)) as client:
-            has_pets, detected_pets, _ = await pet_detector.detect_pets_in_image_url(
-                image_source,
-                client
+        if not stt_service:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Speech-to-text service not available. Install openai-whisper."
             )
-        final_image_url = image_source
+        
+        try:
+            # Step 1: Extract audio from video
+            _logger.info("🎵 Extracting audio from video...")
+            if payload.video_data:
+                audio_bytes = await audio_service.extract_audio_from_video_data(payload.video_data)
+            else:
+                # Download video from URL first
+                async with httpx.AsyncClient(timeout=httpx.Timeout(60.0)) as client:
+                    video_response = await client.get(payload.video_url)
+                    video_response.raise_for_status()
+                    video_bytes = video_response.content
+                
+                # Save to temp file and extract audio
+                with tempfile.NamedTemporaryFile(delete=False, suffix=".mp4") as temp_video:
+                    temp_video.write(video_bytes)
+                    temp_video_path = temp_video.name
+                
+                try:
+                    audio_bytes = await audio_service.extract_audio_from_video_file(temp_video_path)
+                finally:
+                    if os.path.exists(temp_video_path):
+                        os.unlink(temp_video_path)
+            
+            _logger.info(f"✅ Audio extracted: {len(audio_bytes)} bytes")
+            
+            # Step 2: Convert audio to text (STT)
+            _logger.info("🎤 Converting speech to text...")
+            stt_result = await stt_service.transcribe_audio_bytes(audio_bytes)
+            extracted_text = stt_result.get("text", "").strip()
+            detected_language = stt_result.get("language", "en")
+            
+            if not extracted_text:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="No speech detected in video audio. Please ensure the video has clear audio."
+                )
+            
+            _logger.info(f"✅ Text extracted: '{extracted_text[:100]}...' (language: {detected_language})")
+            
+            # Step 3: Filter abusive words using LLM
+            _logger.info("🛡️ Filtering abusive content...")
+            filter_result = await content_filter.filter_abusive_content(extracted_text, detected_language)
+            clean_text = filter_result["filtered_text"]
+            
+            if filter_result["has_abusive_content"]:
+                _logger.info("⚠️ Abusive content detected and filtered")
+            
+            _logger.info(f"✅ Filtered text: '{clean_text[:100]}...'")
+            
+            # Step 4: Extract image frame from video for pet detection
+            _logger.info("🖼️ Extracting frame from video for pet detection...")
+            try:
+                from moviepy.editor import VideoFileClip
+                
+                # Save video to temp file if needed
+                temp_video_path = None
+                if payload.video_data:
+                    if payload.video_data.startswith("data:video/"):
+                        header, base64_data = payload.video_data.split(",", 1)
+                        video_bytes = base64.b64decode(base64_data)
+                    else:
+                        video_bytes = base64.b64decode(payload.video_data)
+                    
+                    with tempfile.NamedTemporaryFile(delete=False, suffix=".mp4") as temp_video:
+                        temp_video.write(video_bytes)
+                        temp_video_path = temp_video.name
+                else:
+                    # Download video from URL
+                    async with httpx.AsyncClient(timeout=httpx.Timeout(60.0)) as client:
+                        video_response = await client.get(payload.video_url)
+                        video_response.raise_for_status()
+                        video_bytes = video_response.content
+                    
+                    with tempfile.NamedTemporaryFile(delete=False, suffix=".mp4") as temp_video:
+                        temp_video.write(video_bytes)
+                        temp_video_path = temp_video.name
+                
+                try:
+                    # Extract frame at 1 second (or first frame if video is shorter)
+                    video = VideoFileClip(temp_video_path)
+                    duration = video.duration
+                    frame_time = min(1.0, duration / 2)  # Use middle of video or 1 second
+                    frame = video.get_frame(frame_time)
+                    video.close()
+                    
+                    # Convert frame to PIL Image
+                    frame_image = Image.fromarray(frame.astype('uint8'))
+                    
+                    # Convert to base64 data URL
+                    img_bytes = io.BytesIO()
+                    frame_image.save(img_bytes, format='PNG')
+                    img_bytes.seek(0)
+                    img_base64 = base64.b64encode(img_bytes.read()).decode('utf-8')
+                    final_image_url = f"data:image/png;base64,{img_base64}"
+                    
+                finally:
+                    if temp_video_path and os.path.exists(temp_video_path):
+                        os.unlink(temp_video_path)
+                        
+            except Exception as e:
+                _logger.exception("Failed to extract frame from video")
+                raise HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail=f"Failed to extract frame from video: {str(e)}"
+                )
+            
+        except AudioExtractionError as e:
+            _logger.exception("Audio extraction failed")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Failed to extract audio from video: {str(e)}"
+            )
+        except SpeechToTextError as e:
+            _logger.exception("Speech-to-text failed")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Failed to convert audio to text: {str(e)}"
+            )
+    
+    # MODE 2: Text + Image (existing flow)
     else:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Either 'image_url' or 'image_data' must be provided"
-        )
+        _logger.info("📝 Processing text + image mode")
+        
+        # Step 1: Determine image source and validate pet presence
+        if payload.image_data:
+            image_source = payload.image_data
+            async with httpx.AsyncClient(timeout=httpx.Timeout(10.0)) as client:
+                has_pets, detected_pets, _ = await pet_detector.detect_pets_in_image_url(
+                    image_source,
+                    client
+                )
+            final_image_url = image_source
+        elif payload.image_url:
+            image_source = str(payload.image_url)
+            async with httpx.AsyncClient(timeout=httpx.Timeout(10.0)) as client:
+                has_pets, detected_pets, _ = await pet_detector.detect_pets_in_image_url(
+                    image_source,
+                    client
+                )
+            final_image_url = image_source
+        else:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Either 'image_url' or 'image_data' must be provided"
+            )
 
+        if not has_pets:
+            _logger.warning(f"No pets detected in image")
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail={
+                    "error": "no_pets_detected",
+                    "message": "No pets found in the uploaded image. Please upload an image or video containing pets (dogs, cats, birds, etc.) to generate a roast video.",
+                    "suggestion": "Try uploading a clear photo or video of your pet."
+                }
+            )
+
+        _logger.info(f"✅ Pets detected: {', '.join(detected_pets)}")
+
+        # Step 2: Process text via AI4Bharat
+        if not payload.text:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Text is required when using image input"
+            )
+        
+        try:
+            llm_result = await ai4bharat_client.translate_text(
+                text=payload.text,
+                source_language="auto",
+                target_language="en",
+                task="translation",
+            )
+            clean_text = _extract_translated_text(llm_result)
+        except (AI4BharatAPIError, KeyError) as exc:
+            _logger.exception("AI4Bharat preprocessing failed for video generation")
+            raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
+    
+    # Validate pet presence in final image (for both modes)
+    async with httpx.AsyncClient(timeout=httpx.Timeout(10.0)) as client:
+        has_pets, detected_pets, _ = await pet_detector.detect_pets_in_image_url(
+            final_image_url,
+            client
+        )
+    
     if not has_pets:
-        _logger.warning(f"No pets detected in image")
+        _logger.warning(f"No pets detected in image/video")
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail={
                 "error": "no_pets_detected",
-                "message": "No pets found in the uploaded image. Please upload an image or video containing pets (dogs, cats, birds, etc.) to generate a roast video.",
+                "message": "No pets found in the uploaded image/video. Please upload an image or video containing pets (dogs, cats, birds, etc.) to generate a roast video.",
                 "suggestion": "Try uploading a clear photo or video of your pet."
             }
         )
-
+    
     _logger.info(f"✅ Pets detected: {', '.join(detected_pets)}")
-
-    # Step 2: Proceed with text processing via AI4Bharat
-    try:
-        llm_result = await ai4bharat_client.translate_text(
-            text=payload.text,
-            source_language="auto",
-            target_language="en",
-            task="translation",
-        )
-        clean_text = _extract_translated_text(llm_result)
-    except (AI4BharatAPIError, KeyError) as exc:
-        _logger.exception("AI4Bharat preprocessing failed for video generation")
-        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
+    _logger.info(f"✅ Final text: '{clean_text[:100]}...' (language: {detected_language})")
 
     # Step 3: Create video generation job with fal.ai
+    # Use original language if audio was scanned (keep same language)
+    target_language = detected_language if (payload.video_data or payload.video_url) else "en"
+    
     try:
         fal_response = await fal_client.create_video_job(
             text=clean_text,
             image_url=final_image_url,
-            language="en",
+            language=target_language,
         )
     except FalAPIError as exc:
         _logger.exception("Failed to create fal.ai job")
@@ -192,13 +381,13 @@ async def generate_video(
     status_value = _normalise_status(fal_response.get("status", "queued"))
     detail = fal_response.get("detail")
 
-    # Step 4: Store job with detected pets metadata
+    # Step 4: Store job with metadata
     record = JobRecord(
         job_id=job_id,
         status=status_value,
         text=clean_text,
         image_url=final_image_url,
-        language="en",
+        language=target_language,
         detail=detail,
     )
     await job_store.upsert(record)

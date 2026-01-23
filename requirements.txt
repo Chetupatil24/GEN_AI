@@ -19,6 +19,11 @@ numpy==2.1.3
 opencv-python==4.12.0.88
 pillow==10.2.0
 
+# Audio & Speech Processing
+moviepy==1.0.3
+openai-whisper==20231117
+ffmpeg-python==0.2.0
+
 # Web Interface (Optional - for local testing)
 streamlit==1.52.2
 

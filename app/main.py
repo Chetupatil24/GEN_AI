@@ -21,6 +21,8 @@ from app.core.config import Settings, get_settings, clear_settings_cache
 from app.services.job_store import JobStore
 from app.services.redis_job_store import RedisJobStore
 from app.services.video_storage import VideoStorageService
+from app.services.audio_extraction import get_audio_extraction_service
+from app.services.speech_to_text import get_speech_to_text_service
 
 _logger = logging.getLogger(__name__)
 
@@ -76,6 +78,25 @@ async def lifespan(app: FastAPI):
         app.state.ai4bharat_client = ai4bharat_client
         app.state.fal_client = fal_client
         app.state.video_storage = video_storage
+        
+        # Initialize audio extraction and STT services (optional)
+        try:
+            audio_service = get_audio_extraction_service()
+            app.state.audio_extraction_service = audio_service
+            if audio_service:
+                _logger.info("✅ Audio extraction service initialized")
+        except Exception as e:
+            _logger.warning(f"⚠️  Audio extraction service not available: {e}")
+            app.state.audio_extraction_service = None
+        
+        try:
+            stt_service = get_speech_to_text_service(model_size="base")
+            app.state.stt_service = stt_service
+            if stt_service:
+                _logger.info("✅ Speech-to-text service initialized")
+        except Exception as e:
+            _logger.warning(f"⚠️  Speech-to-text service not available: {e}")
+            app.state.stt_service = None
 
         _logger.info("Application startup complete")
         yield
